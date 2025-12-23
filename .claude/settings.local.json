@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dpkg:*)",
+      "Bash(dpkg-deb:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(apt update:*)",
+      "Bash(apt-cache:*)",
+      "Bash(./zabbix-deployer.sh:*)",
+      "Bash(yes:*)",
+      "Bash(tee:*)"
+    ]
+  }
+}

@@ -267,6 +267,73 @@ install_database() {
   print_progress "Database Installation"
 }
 
+# Configure system locales
+configure_locales() {
+  log_msg "🌐 Configuring system locales..." yes
+
+  case "$DISTRO" in
+    ubuntu|debian|raspbian)
+      # Install locales package
+      apt install -y locales || { log_msg "⚠️ Failed to install locales package." yes; }
+
+      # Generate en_US.UTF-8 locale
+      if ! locale -a | grep -qi "en_US.utf8"; then
+        log_msg "Generating en_US.UTF-8 locale..." yes
+        sed -i '/^# *en_US.UTF-8 UTF-8/s/^# *//' /etc/locale.gen 2>/dev/null || echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+        locale-gen en_US.UTF-8 || { log_msg "⚠️ Failed to generate en_US.UTF-8 locale." yes; }
+        update-locale LANG=en_US.UTF-8 || { log_msg "⚠️ Failed to update default locale." yes; }
+      fi
+      ;;
+    sles)
+      # SLES uses different locale management
+      zypper install -y glibc-locale || { log_msg "⚠️ Failed to install glibc-locale." yes; }
+      ;;
+    centos|alma|oracle|rocky|rhel|amazonlinux)
+      # RHEL-based systems
+      dnf install -y glibc-langpack-en || yum install -y glibc-langpack-en || { log_msg "⚠️ Failed to install language packs." yes; }
+      ;;
+  esac
+
+  log_msg "✅ Locales configured." yes
+}
+
+# Restart Zabbix and web server services
+restart_services() {
+  local webserver="$1"
+  log_msg "🔄 Restarting Zabbix and web server services..." yes
+
+  case "$DISTRO" in
+    ubuntu|debian|raspbian)
+      systemctl restart zabbix-server zabbix-agent2 || { log_msg "❌ Failed to restart Zabbix services." yes; exit 1; }
+      if [[ "$webserver" == "apache" ]]; then
+        systemctl restart apache2 || { log_msg "❌ Failed to restart apache2." yes; exit 1; }
+      elif [[ "$webserver" == "nginx" ]]; then
+        local PHP_FPM=$(get_php_fpm_version)
+        systemctl restart nginx $PHP_FPM || { log_msg "❌ Failed to restart nginx or $PHP_FPM." yes; exit 1; }
+      fi
+      ;;
+    sles)
+      systemctl restart zabbix-server zabbix-agent2 || { log_msg "❌ Failed to restart Zabbix services." yes; exit 1; }
+      if [[ "$webserver" == "apache" ]]; then
+        systemctl restart apache2 || { log_msg "❌ Failed to restart apache2." yes; exit 1; }
+      elif [[ "$webserver" == "nginx" ]]; then
+        systemctl restart nginx php-fpm || { log_msg "❌ Failed to restart nginx or php-fpm." yes; exit 1; }
+      fi
+      ;;
+    centos|alma|oracle|rocky|rhel|amazonlinux)
+      systemctl restart zabbix-server zabbix-agent2 || { log_msg "❌ Failed to restart Zabbix services." yes; exit 1; }
+      if [[ "$webserver" == "apache" ]]; then
+        systemctl restart httpd php-fpm || { log_msg "❌ Failed to restart httpd or php-fpm." yes; exit 1; }
+      elif [[ "$webserver" == "nginx" ]]; then
+        systemctl restart nginx php-fpm || { log_msg "❌ Failed to restart nginx or php-fpm." yes; exit 1; }
+      fi
+      ;;
+  esac
+
+  log_msg "✅ Services restarted successfully." yes
+  print_progress "Service Restart"
+}
+
 # Configure database for Zabbix
 configure_database() {
   local db="$1"
@@ -334,6 +401,118 @@ EOF
   print_progress "Server Configuration"
 }
 
+# Configure Zabbix frontend
+configure_zabbix_frontend() {
+  local db="$1"
+  local db_password="$2"
+  log_msg "🌐 Configuring Zabbix frontend..." yes
+
+  local frontend_conf="/etc/zabbix/web/zabbix.conf.php"
+
+  # Create frontend configuration directory if it doesn't exist
+  mkdir -p /etc/zabbix/web
+
+  # Create frontend configuration file
+  cat > "$frontend_conf" << EOF
+<?php
+// Zabbix GUI configuration file.
+
+\$DB['TYPE']				= 'MYSQL';
+\$DB['SERVER']			= 'localhost';
+\$DB['PORT']				= '0';
+\$DB['DATABASE']			= 'zabbix';
+\$DB['USER']				= 'zabbix';
+\$DB['PASSWORD']			= '$db_password';
+
+// Schema name. Used for PostgreSQL.
+\$DB['SCHEMA']			= '';
+
+// Used for TLS connection.
+\$DB['ENCRYPTION']		= false;
+\$DB['KEY_FILE']			= '';
+\$DB['CERT_FILE']		= '';
+\$DB['CA_FILE']			= '';
+\$DB['VERIFY_HOST']		= false;
+\$DB['CIPHER_LIST']		= '';
+
+// Vault configuration. Used if database credentials are stored in Vault secrets manager.
+\$DB['VAULT_URL']		= '';
+\$DB['VAULT_DB_PATH']	= '';
+\$DB['VAULT_TOKEN']		= '';
+
+// Use IEEE754 compatible value range for 64-bit Numeric (float) history values.
+\$DB['DOUBLE_IEEE754']	= true;
+
+\$ZBX_SERVER_NAME		= '';
+
+\$IMAGE_FORMAT_DEFAULT	= IMAGE_FORMAT_PNG;
+EOF
+
+  # Set proper permissions
+  chown www-data:www-data "$frontend_conf" || chown apache:apache "$frontend_conf" 2>/dev/null || true
+  chmod 640 "$frontend_conf"
+
+  log_msg "✅ Zabbix frontend configuration created at $frontend_conf." yes
+}
+
+# Configure web server for Zabbix
+configure_webserver() {
+  local webserver="$1"
+  log_msg "🌐 Configuring $webserver for Zabbix..." yes
+
+  case "$DISTRO" in
+    ubuntu|debian|raspbian)
+      if [[ "$webserver" == "nginx" ]]; then
+        # Stop and disable Apache if it's running
+        if systemctl is-active apache2 &>/dev/null; then
+          log_msg "Stopping Apache2 to prevent port conflicts..." yes
+          systemctl stop apache2 || true
+          systemctl disable apache2 || true
+        fi
+
+        # Remove default nginx site
+        if [[ -f /etc/nginx/sites-enabled/default ]]; then
+          log_msg "Removing default nginx site..." yes
+          rm -f /etc/nginx/sites-enabled/default
+        fi
+
+        # Configure Zabbix nginx config to listen on port 80
+        if [[ -f /etc/zabbix/nginx.conf ]]; then
+          log_msg "Configuring nginx to listen on port 80..." yes
+          sed -i 's/^#.*listen.*80;/        listen          80;/' /etc/zabbix/nginx.conf
+          sed -i 's/^#.*server_name.*/        server_name     _;/' /etc/zabbix/nginx.conf
+        fi
+      elif [[ "$webserver" == "apache" ]]; then
+        # Stop and disable nginx if it's running
+        if systemctl is-active nginx &>/dev/null; then
+          log_msg "Stopping nginx to prevent port conflicts..." yes
+          systemctl stop nginx || true
+          systemctl disable nginx || true
+        fi
+      fi
+      ;;
+    sles|centos|alma|oracle|rocky|rhel|amazonlinux)
+      if [[ "$webserver" == "nginx" ]]; then
+        # Stop and disable httpd if it's running
+        if systemctl is-active httpd &>/dev/null; then
+          log_msg "Stopping httpd to prevent port conflicts..." yes
+          systemctl stop httpd || true
+          systemctl disable httpd || true
+        fi
+
+        # Configure Zabbix nginx config
+        if [[ -f /etc/zabbix/nginx.conf ]]; then
+          log_msg "Configuring nginx to listen on port 80..." yes
+          sed -i 's/^#.*listen.*80;/        listen          80;/' /etc/zabbix/nginx.conf
+          sed -i 's/^#.*server_name.*/        server_name     _;/' /etc/zabbix/nginx.conf
+        fi
+      fi
+      ;;
+  esac
+
+  log_msg "✅ Web server configured." yes
+}
+
 # Install Zabbix
 install_zabbix() {
   local version="$1"
@@ -374,13 +553,11 @@ install_zabbix() {
       if [[ "$webserver" == "apache" ]]; then
         apt install -y apache2 || { log_msg "❌ Failed to install apache2." yes; exit 1; }
         systemctl enable apache2 || { log_msg "❌ Failed to enable apache2 service." yes; exit 1; }
-        systemctl restart zabbix-server zabbix-agent2 apache2 || { log_msg "❌ Failed to restart services." yes; exit 1; }
       elif [[ "$webserver" == "nginx" ]]; then
         local PHP_FPM=$(get_php_fpm_version)
         log_msg "Using PHP-FPM version: $PHP_FPM" yes
         apt install -y nginx $PHP_FPM || { log_msg "❌ Failed to install nginx or $PHP_FPM." yes; exit 1; }
         systemctl enable nginx $PHP_FPM || { log_msg "❌ Failed to enable nginx or $PHP_FPM services." yes; exit 1; }
-        systemctl restart zabbix-server zabbix-agent2 nginx $PHP_FPM || { log_msg "❌ Failed to restart services." yes; exit 1; }
       fi
       ;;
     sles)
@@ -411,10 +588,8 @@ install_zabbix() {
       systemctl enable zabbix-server zabbix-agent2 || { log_msg "❌ Failed to enable Zabbix services." yes; exit 1; }
       if [[ "$webserver" == "apache" ]]; then
         systemctl enable apache2 || { log_msg "❌ Failed to enable apache2 service." yes; exit 1; }
-        systemctl restart zabbix-server zabbix-agent2 apache2 || { log_msg "❌ Failed to restart services." yes; exit 1; }
       elif [[ "$webserver" == "nginx" ]]; then
         systemctl enable nginx php-fpm || { log_msg "❌ Failed to enable nginx or php-fpm services." yes; exit 1; }
-        systemctl restart zabbix-server zabbix-agent2 nginx php-fpm || { log_msg "❌ Failed to restart services." yes; exit 1; }
       fi
       ;;
     centos|alma|oracle|rocky|rhel|amazonlinux)
@@ -443,10 +618,8 @@ install_zabbix() {
       systemctl enable zabbix-server zabbix-agent2 || { log_msg "❌ Failed to enable Zabbix services." yes; exit 1; }
       if [[ "$webserver" == "apache" ]]; then
         systemctl enable httpd php-fpm || { log_msg "❌ Failed to enable httpd or php-fpm services." yes; exit 1; }
-        systemctl restart zabbix-server zabbix-agent2 httpd php-fpm || { log_msg "❌ Failed to restart services." yes; exit 1; }
       elif [[ "$webserver" == "nginx" ]]; then
         systemctl enable nginx php-fpm || { log_msg "❌ Failed to enable nginx or php-fpm services." yes; exit 1; }
-        systemctl restart zabbix-server zabbix-agent2 nginx php-fpm || { log_msg "❌ Failed to restart services." yes; exit 1; }
       fi
       ;;
   esac
@@ -896,6 +1069,9 @@ case "$ACTION" in
     log_msg "✅ Prerequisites installed." yes
     print_progress "Prerequisites Installation"
 
+    # Configure locales
+    configure_locales
+
     # Install database
     install_database "$DB"
 
@@ -908,9 +1084,22 @@ case "$ACTION" in
     # Configure Zabbix server
     configure_zabbix_server "$DB" "$DB_PASSWORD"
 
+    # Configure Zabbix frontend
+    configure_zabbix_frontend "$DB" "$DB_PASSWORD"
+
+    # Configure web server
+    configure_webserver "$WEBSERVER"
+
+    # Restart services
+    restart_services "$WEBSERVER"
+
     print_center_box "Installation Complete"
     print_msg "✅ Zabbix $ZBX_VERSION is installed and configured."
-    print_msg "🌐 Access the Zabbix frontend at http://<server_ip>/zabbix"
+    if [[ "$WEBSERVER" == "nginx" ]]; then
+      print_msg "🌐 Access the Zabbix frontend at http://<server_ip>/"
+    else
+      print_msg "🌐 Access the Zabbix frontend at http://<server_ip>/zabbix"
+    fi
     print_msg "👤 Default login: Admin / zabbix"
     print_msg "📜 Log file: $LOG_FILE"
     print_msg "⚙️ Configuration file: $CONFIG_FILE"

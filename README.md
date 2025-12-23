@@ -17,17 +17,22 @@ Production-ready bash scripts for automated installation, upgrade, and managemen
 
 ## ✨ Features
 
-- ✅ **Automated Installation** - One-command installation of Zabbix Server, Proxy, or Agent
+- ✅ **Fully Automated Installation** - Zero manual steps, complete hands-off deployment
+- ✅ **Automatic Frontend Configuration** - Creates web config automatically (no installation wizard)
+- ✅ **Locale Auto-Configuration** - Generates required locales to prevent frontend errors
+- ✅ **Web Server Auto-Configuration** - Automatically configures Nginx/Apache, handles port conflicts
+- ✅ **Smart Service Management** - Proper startup order (no premature service failures)
 - ✅ **Automated Upgrades** - Zero-downtime upgrades with automatic backups
 - ✅ **Multi-Platform Support** - Ubuntu, Debian, RHEL, CentOS, Rocky, Alma, Oracle Linux, SLES
-- ✅ **Database Support** - MySQL/MariaDB and PostgreSQL
-- ✅ **Web Server Support** - Apache and Nginx
+- ✅ **Database Support** - MySQL/MariaDB and PostgreSQL with automatic schema import
+- ✅ **Web Server Support** - Apache and Nginx with intelligent conflict resolution
+- ✅ **Dual Password Modes** - `--default` for dev/test, `--manual` for production
 - ✅ **Automatic Backups** - Configuration and database backups before upgrades
-- ✅ **Version 7.2+ Support** - Automatic handling of frontend path changes
-- ✅ **PHP Auto-Detection** - Automatically detects available PHP-FPM version
+- ✅ **Version 6.0-7.4 Support** - All current Zabbix LTS and stable versions
+- ✅ **PHP Auto-Detection** - Automatically detects available PHP-FPM version (7.4-8.3)
 - ✅ **Repository Management** - JSON-based repository URL management
 - ✅ **Progress Tracking** - Real-time progress bars and detailed logging
-- ✅ **Non-Interactive Mode** - Support for automation with --yes flag
+- ✅ **Non-Interactive Mode** - Full automation support with `--yes` flag
 
 ## 🔧 Prerequisites
 
@@ -45,26 +50,41 @@ Production-ready bash scripts for automated installation, upgrade, and managemen
 
 ## 🚀 Quick Start
 
-### Install Zabbix Server (Default Mode)
+### Development/Testing Installation (Recommended for First-Time Users)
 ```bash
-sudo ./zabbix-deployer.sh --install --default --version 7.4 --db mysql --webserver apache
+# Fully automated - no prompts, ready in minutes
+sudo ./zabbix-deployer.sh --install --default --version 6.0 --db mysql --webserver nginx --yes
+```
+**Access**: `http://your-server-ip/` (nginx) or `http://your-server-ip/zabbix` (apache)
+**Login**: Username: `Admin` | Password: `zabbix`
+**Database Password**: `zabbix_password` (change for production!)
+
+### Production Installation (Secure)
+```bash
+# Interactive - prompts for secure database password
+sudo ./zabbix-manager.sh --component server --action install \
+  --version 7.4 --db mysql --webserver apache --manual
 ```
 
-### Upgrade Zabbix Server (Non-Interactive)
+### Upgrade Zabbix Server
 ```bash
-sudo ./zabbix-deployer.sh --upgrade --version 7.4 --db mysql --webserver apache --yes
+# Fully automated upgrade with automatic backups
+sudo ./zabbix-deployer.sh --upgrade --version 7.4 --db mysql --webserver nginx --yes
 ```
 
 ### Using the Master Manager Script
 ```bash
-# Install server
-sudo ./zabbix-manager.sh --component server --action install --version 7.4 --db mysql --webserver apache
+# Install server (development)
+sudo ./zabbix-manager.sh --component server --action install \
+  --version 7.4 --db mysql --webserver apache --default --yes
 
 # Install agent
-sudo ./zabbix-manager.sh --component agent --action install --version 7.4
+sudo ./zabbix-manager.sh --component agent --action install \
+  --version 7.4 --server-ip 192.168.1.100 --yes
 
 # Install proxy
-sudo ./zabbix-manager.sh --component proxy --action install --version 7.4 --db mysql
+sudo ./zabbix-manager.sh --component proxy --action install \
+  --version 7.4 --db mysql --server-ip 192.168.1.100 --yes
 ```
 
 ## 📦 Components
@@ -101,15 +121,41 @@ Repository URLs for Zabbix Proxy packages.
 
 ## 📖 Usage
 
+### Password Modes: `--default` vs `--manual`
+
+**When to use `--default` mode:**
+- ✅ **Testing/Development environments** - Quick setup for testing
+- ✅ **POC/Demo installations** - Temporary installations for demonstrations
+- ✅ **Lab environments** - Internal testing and learning
+- ✅ **Automated deployments** - CI/CD pipelines where passwords are changed later
+- ✅ **Docker/Containers** - Containerized deployments with secrets management
+- ⚠️ **Default password**: `zabbix_password` - **MUST be changed for production!**
+
+**When to use `--manual` mode:**
+- ✅ **Production environments** - Secure installations with custom passwords
+- ✅ **Security-compliant deployments** - Meets security policy requirements
+- ✅ **Multi-tenant environments** - Different passwords for different installations
+- ✅ **Compliance requirements** - Audit trails require custom passwords
+- 🔒 **Interactive prompt**: Asks for password during installation (not compatible with `--yes` flag)
+
+**Example Decision Flow:**
+```
+Are you installing in production?
+  └─ YES → Use --manual (secure custom password)
+  └─ NO → Is this temporary/testing?
+      └─ YES → Use --default (quick setup, change later if needed)
+      └─ NO → Use --manual (better safe than sorry)
+```
+
 ### Zabbix Server Deployment
 
 #### Installation
 ```bash
-# Interactive installation (manual mode - prompts for password)
+# Production installation (manual mode - secure password)
 sudo ./zabbix-deployer.sh --install --manual --version 7.4 --db mysql --webserver apache
 
-# Non-interactive installation (default mode - uses default password)
-sudo ./zabbix-deployer.sh --install --default --version 7.4 --db mysql --webserver nginx
+# Development/Testing installation (default mode - uses 'zabbix_password')
+sudo ./zabbix-deployer.sh --install --default --version 7.4 --db mysql --webserver nginx --yes
 ```
 
 #### Upgrade
@@ -133,15 +179,16 @@ sudo ./zabbix-deployer.sh --uninstall
 | `--install` | Yes* | - | Install Zabbix |
 | `--upgrade` | Yes* | - | Upgrade Zabbix |
 | `--uninstall` | Yes* | - | Uninstall Zabbix |
-| `--version` | Yes** | 6.0, 7.0, 7.2, 7.4 | Zabbix version |
-| `--db` | Yes** | mysql, pgsql | Database type |
+| `--version` | Yes** | 6.0, 7.0, 7.2, 7.4 | Zabbix version to install/upgrade |
+| `--db` | Yes** | mysql, pgsql | Database type (MySQL/MariaDB or PostgreSQL) |
 | `--webserver` | Yes** | apache, nginx | Web server type |
-| `--default` | No | - | Use default password |
-| `--manual` | No | - | Prompt for password |
-| `--yes`, `-y` | No | - | Auto-confirm prompts |
+| `--default` | Yes*** | - | **Dev/Test Mode**: Uses default password `zabbix_password` |
+| `--manual` | Yes*** | - | **Production Mode**: Prompts for secure custom password |
+| `--yes`, `-y` | No | - | Auto-confirm all prompts (non-interactive mode) |
 
-\* One action required
-\*\* Not required for uninstall
+\* One action required (install, upgrade, or uninstall)
+\*\* Required for install/upgrade, not required for uninstall
+\*\*\* Either `--default` or `--manual` required for install action only
 
 ## 📝 Configuration Files
 
@@ -188,18 +235,30 @@ Example structure for `zabbix-server-repos.json`:
 
 ## 💡 Examples
 
-### Example 1: Fresh Server Installation
+### Example 1: Production Server Installation (Secure)
 ```bash
-# Install Zabbix 7.4 with MySQL and Apache
-sudo ./zabbix-deployer.sh --install --default \
+# Install Zabbix 7.4 for production with custom password
+# Interactive - will prompt for database password
+sudo ./zabbix-deployer.sh --install --manual \
   --version 7.4 \
   --db mysql \
   --webserver apache
 ```
 
-### Example 2: Upgrade from 7.0 to 7.4
+### Example 2: Development/Testing Installation (Quick Setup)
 ```bash
-# Non-interactive upgrade
+# Install Zabbix 6.0 for development with default password
+# Fully automated - no prompts
+sudo ./zabbix-deployer.sh --install --default \
+  --version 6.0 \
+  --db mysql \
+  --webserver nginx \
+  --yes
+```
+
+### Example 3: Upgrade from 7.0 to 7.4
+```bash
+# Non-interactive upgrade (uses existing database password)
 sudo ./zabbix-deployer.sh --upgrade \
   --version 7.4 \
   --db mysql \
@@ -207,23 +266,38 @@ sudo ./zabbix-deployer.sh --upgrade \
   --yes
 ```
 
-### Example 3: Install with PostgreSQL and Nginx
+### Example 4: Install with PostgreSQL (Production)
 ```bash
-# Interactive installation with PostgreSQL
+# Production installation with PostgreSQL and Nginx
+# Interactive - prompts for password
 sudo ./zabbix-deployer.sh --install --manual \
   --version 7.4 \
   --db pgsql \
   --webserver nginx
 ```
 
-### Example 4: Using Master Manager
+### Example 5: Docker/Container Deployment (Default Password, Changed Later)
+```bash
+# Quick deployment for containerized environment
+# Password will be changed via secrets management
+sudo ./zabbix-deployer.sh --install --default \
+  --version 7.4 \
+  --db mysql \
+  --webserver apache \
+  --yes
+
+# Later, change password using secrets management or manual update
+```
+
+### Example 6: Using Master Manager
 ```bash
 # Install Zabbix Agent on multiple hosts
 sudo ./zabbix-manager.sh \
   --component agent \
   --action install \
   --version 7.4 \
-  --server-ip 192.168.1.100
+  --server-ip 192.168.1.100 \
+  --yes
 
 # Install Zabbix Proxy with MySQL
 sudo ./zabbix-manager.sh \
@@ -231,7 +305,8 @@ sudo ./zabbix-manager.sh \
   --action install \
   --version 7.4 \
   --db mysql \
-  --server-ip 192.168.1.100
+  --server-ip 192.168.1.100 \
+  --yes
 ```
 
 ## 🔍 Troubleshooting
@@ -255,8 +330,38 @@ systemctl status apache2  # or nginx
 
 ### Common Issues
 
+#### Issue: "Locale for language 'en_US' is not found on the web server"
+**Solution**: The script (v2.1+) automatically generates locales. For manual fix:
+```bash
+sudo apt install -y locales
+sudo sed -i '/en_US.UTF-8 UTF-8/s/^# //g' /etc/locale.gen
+sudo locale-gen en_US.UTF-8
+sudo systemctl restart zabbix-server apache2  # or nginx php8.3-fpm
+```
+
+#### Issue: "Zabbix server won't start - database connection failed"
+**Solution**: Check database password matches in both:
+- `/etc/zabbix/zabbix_server.conf` (DBPassword=)
+- `/etc/zabbix/web/zabbix.conf.php` ($DB['PASSWORD'])
+
+#### Issue: "Installation shows wizard instead of login page"
+**Solution**: The script (v2.1+) creates frontend config automatically. For manual fix:
+```bash
+# Frontend config is missing, check if it exists
+ls -la /etc/zabbix/web/zabbix.conf.php
+# If missing, re-run: configure_zabbix_frontend function
+```
+
+#### Issue: "Nginx won't start - port 80 already in use"
+**Solution**: The script (v2.1+) automatically stops Apache. For manual fix:
+```bash
+sudo systemctl stop apache2
+sudo systemctl disable apache2
+sudo systemctl start nginx
+```
+
 #### Issue: "No Zabbix repository files found after installation"
-**Solution**: The script now automatically handles this by purging and reinstalling the repository package.
+**Solution**: The script automatically handles this by purging and reinstalling the repository package.
 
 #### Issue: "Frontend shows path warning after upgrade to 7.2+"
 **Solution**: The script automatically updates Apache/Nginx configuration. If you see this, re-run the upgrade.
@@ -325,20 +430,75 @@ sudo -u postgres psql zabbix < /opt/zabbix-backup-YYYYMMDD_HHMMSS/zabbix_db.sql
 
 ## 🔒 Security Considerations
 
-1. **Database Passwords**:
-   - Default mode uses `zabbix_password` - **Change in production!**
-   - Manual mode prompts for secure password
-   - Passwords stored in `/etc/zabbix/zabbix_server.conf` (mode 640)
+### 1. Database Password Management
 
-2. **Backups**:
-   - Backups stored in `/opt/zabbix-backup-*`
-   - Contain sensitive data - protect accordingly
-   - Retain for disaster recovery
+**Default Mode (`--default`)**:
+- Uses password: `zabbix_password`
+- ⚠️ **CRITICAL**: Change this password immediately in production!
+- Suitable only for: Development, Testing, POC, Lab environments
+- Password is stored in:
+  - `/etc/zabbix/zabbix_server.conf` (Server config)
+  - `/etc/zabbix/web/zabbix.conf.php` (Frontend config)
 
-3. **Log Files**:
-   - Logs may contain sensitive information
-   - Stored in `/var/log/zabbix_install.log`
-   - Review and clean periodically
+**Manual Mode (`--manual`)**:
+- Prompts for password during installation
+- Password entered securely (not displayed on screen)
+- Recommended for: Production, Security-compliant, Multi-tenant environments
+- Cannot be used with `--yes` flag (requires interactive input)
+
+**How to Change Database Password After Installation**:
+```bash
+# 1. Change MySQL password
+mysql -uroot -e "ALTER USER 'zabbix'@'localhost' IDENTIFIED BY 'your_new_secure_password';"
+
+# 2. Update Zabbix server configuration
+sudo sed -i 's/^DBPassword=.*/DBPassword=your_new_secure_password/' /etc/zabbix/zabbix_server.conf
+
+# 3. Update frontend configuration
+sudo sed -i "s/\$DB\['PASSWORD'\].*/\$DB['PASSWORD'] = 'your_new_secure_password';/" /etc/zabbix/web/zabbix.conf.php
+
+# 4. Restart Zabbix server
+sudo systemctl restart zabbix-server
+```
+
+**Password Storage Security**:
+- Server config: `/etc/zabbix/zabbix_server.conf` (mode 640, owner: zabbix:zabbix)
+- Frontend config: `/etc/zabbix/web/zabbix.conf.php` (mode 640, owner: www-data:www-data)
+- Both files are protected from unauthorized access
+
+### 2. Backups
+
+- **Location**: `/opt/zabbix-backup-YYYYMMDD_HHMMSS/`
+- **Contents**: Configuration files + Database dumps
+- ⚠️ **Contain sensitive data** - Protect with appropriate permissions
+- **Retention**: Keep for disaster recovery, rotate regularly
+- **Encryption**: Consider encrypting backups for additional security
+
+### 3. Log Files
+
+- **Location**: `/var/log/zabbix_install.log`
+- ⚠️ **May contain**: Database passwords, configuration details
+- **Recommendation**: Review and clean periodically
+- **Permissions**: Ensure only root can read (mode 600)
+
+### 4. Network Security
+
+- **Frontend Access**: Configure firewall rules for port 80/443
+- **Database Access**: MySQL/PostgreSQL should only listen on localhost
+- **Agent Communication**: Use encryption for agent-server communication
+- **API Access**: Enable API authentication and use tokens
+
+### 5. SSL/TLS Configuration
+
+After installation, consider enabling HTTPS:
+```bash
+# For Apache
+sudo a2enmod ssl
+sudo systemctl restart apache2
+
+# For Nginx
+# Configure SSL in /etc/nginx/sites-available/zabbix
+```
 
 ## 📁 File Structure
 
@@ -357,7 +517,18 @@ sudo -u postgres psql zabbix < /opt/zabbix-backup-YYYYMMDD_HHMMSS/zabbix_db.sql
 
 ## 🔄 Changelog
 
-### Version 2.0 (Current)
+### Version 2.1 (Current - December 2025)
+- ✅ **Locale Configuration**: Automatic generation of `en_US.UTF-8` locale to prevent frontend errors
+- ✅ **Frontend Auto-Configuration**: Creates `/etc/zabbix/web/zabbix.conf.php` automatically (no installation wizard)
+- ✅ **Web Server Auto-Configuration**:
+  - Nginx: Automatically uncomments `listen 80`, removes default site, stops Apache conflicts
+  - Apache: Automatically stops Nginx conflicts
+- ✅ **Service Restart Fix**: Services now restart AFTER configuration (fixes startup failures)
+- ✅ **Complete Automation**: Zero manual steps required - fully hands-off installation
+- ✅ **Enhanced Security Documentation**: Clear guidance on `--default` vs `--manual` modes
+- ✅ **Password Management**: Added instructions for changing default passwords post-installation
+
+### Version 2.0
 - ✅ Added automatic Apache/Nginx configuration for Zabbix 7.2+
 - ✅ Added `--yes` flag for non-interactive mode
 - ✅ Improved repository handling with purge before reinstall
@@ -419,6 +590,7 @@ To improve these scripts:
 
 ---
 
-**Last Updated**: December 2025
-**Script Version**: 2.0
+**Last Updated**: December 23, 2025
+**Script Version**: 2.1
 **Tested Zabbix Versions**: 6.0, 7.0, 7.2, 7.4
+**Tested Platforms**: Ubuntu 20.04/22.04/24.04, Debian 11/12, RHEL 8/9, Rocky 8/9

@@ -279,16 +279,18 @@ delegate_proxy() {
 
 # Delegate agent operations
 delegate_agent() {
-    log INFO "Managing Zabbix Agent: $ACTION"
+    local cmd="$SCRIPT_DIR/zabbix-agent-deployer.sh --action $ACTION"
 
-    # For now, call a placeholder or implement agent-specific logic
-    # You can create a separate zabbix-agent-deployer.sh
-    log WARNING "Agent management is delegated to specialized script (to be implemented)"
-    log INFO "Component: $COMPONENT"
-    log INFO "Action: $ACTION"
-    log INFO "Version: $VERSION"
-    log INFO "Server IP: ${SERVER_IP:-not specified}"
-    log INFO "Install Plugins: ${INSTALL_PLUGINS:-no}"
+    if [[ "$ACTION" != "uninstall" ]]; then
+        cmd="$cmd --version $VERSION"
+        [[ -n "$SERVER_IP" ]] && cmd="$cmd --server-ip $SERVER_IP"
+        [[ "${INSTALL_PLUGINS:-no}" == "yes" ]] && cmd="$cmd --plugins"
+    fi
+
+    [[ "$AUTO_CONFIRM" == "yes" ]] && cmd="$cmd --yes"
+
+    log INFO "Executing: $cmd"
+    eval "$cmd"
 }
 
 # Main execution

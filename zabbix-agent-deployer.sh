@@ -332,7 +332,36 @@ install_repository() {
     case "$OS_ID" in
         ubuntu|debian)
             local deb_file="/tmp/zabbix-release.deb"
-            wget -q "$repo_url" -O "$deb_file" || { log ERROR "Failed to download repository package"; exit 1; }
+            local local_deb=""
+
+            # Check for local .deb files first (fallback for unavailable online repos)
+            if [[ -f "$SCRIPT_DIR/zabbix-release_latest_${VERSION}+${OS_ID}${OS_VERSION_ID}_all.deb" ]]; then
+                local_deb="$SCRIPT_DIR/zabbix-release_latest_${VERSION}+${OS_ID}${OS_VERSION_ID}_all.deb"
+            elif [[ -f "$SCRIPT_DIR/zabbix-release_${VERSION}-1+${OS_ID}${OS_VERSION_ID}_all.deb" ]]; then
+                local_deb="$SCRIPT_DIR/zabbix-release_${VERSION}-1+${OS_ID}${OS_VERSION_ID}_all.deb"
+            fi
+
+            # Try local file first, then download
+            if [[ -n "$local_deb" ]]; then
+                log INFO "Using local repository package: $(basename $local_deb)"
+                cp "$local_deb" "$deb_file" || { log ERROR "Failed to copy local repository package"; exit 1; }
+            else
+                # Try to download from URL
+                log INFO "Downloading from: $repo_url"
+                if ! wget -q "$repo_url" -O "$deb_file" 2>/dev/null; then
+                    # If download fails, try to find any local .deb file for this version
+                    local_deb=$(ls "$SCRIPT_DIR"/zabbix-release*${VERSION}*.deb 2>/dev/null | head -1)
+                    if [[ -n "$local_deb" ]]; then
+                        log WARNING "Download failed, using available local package: $(basename $local_deb)"
+                        cp "$local_deb" "$deb_file" || { log ERROR "Failed to copy local repository package"; exit 1; }
+                    else
+                        log ERROR "Failed to download repository package and no local package found"
+                        log ERROR "Please download the repository package manually or use version 7.0"
+                        exit 1
+                    fi
+                fi
+            fi
+
             dpkg -i "$deb_file" || { log ERROR "Failed to install repository package"; exit 1; }
             rm -f "$deb_file"
             apt update || { log ERROR "Failed to update package lists"; exit 1; }

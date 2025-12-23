@@ -9,7 +9,8 @@
       "Bash(apt-cache:*)",
       "Bash(./zabbix-deployer.sh:*)",
       "Bash(yes:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(curl:*)"
     ]
   }
 }

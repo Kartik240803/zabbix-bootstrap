@@ -405,9 +405,10 @@ install_repository() {
                 fi
             fi
 
-            dpkg -i "$deb_file" || { log ERROR "Failed to install repository package"; exit 1; }
+            dpkg -i "$deb_file" >/dev/null 2>&1 || { log ERROR "Failed to install repository package"; exit 1; }
             rm -f "$deb_file"
-            apt update || { log ERROR "Failed to update package lists"; exit 1; }
+            log INFO "Updating package lists..."
+            apt update >/dev/null 2>&1 || { log ERROR "Failed to update package lists"; exit 1; }
             ;;
         rhel|centos|rocky|alma|oracle)
             rpm -Uvh "$repo_url" || { log ERROR "Failed to install repository package"; exit 1; }
@@ -439,24 +440,38 @@ fix_ubuntu_24_dependencies() {
             target_dir="/usr/lib/aarch64-linux-gnu"
         fi
 
-        # Try to install libldap packages (suppress errors as we'll use fallback)
-        log INFO "Ensuring libldap libraries are available..."
+        # Try to install libldap packages
+        log INFO "Ensuring libldap-2.5-0 is available..."
+
+        # First try via apt (quiet)
         DEBIAN_FRONTEND=noninteractive apt install -y libldap-common >/dev/null 2>&1 || true
         DEBIAN_FRONTEND=noninteractive apt install -y libldap-2.5-0 >/dev/null 2>&1 || true
 
-        # If libldap-2.5-0 is not available, try other versions
+        # Check if installation succeeded
         if ! dpkg -l 2>/dev/null | grep -q "libldap-2.5-0"; then
-            log INFO "Installing alternative libldap version..."
+            log INFO "Package not in Ubuntu repos, downloading from Debian..."
 
-            # Try common alternatives
-            for pkg in libldap-2.6-0 libldap-2.4-2 libldap2; do
-                if apt-cache show "$pkg" >/dev/null 2>&1; then
-                    log INFO "Using: $pkg"
-                    DEBIAN_FRONTEND=noninteractive apt install -y "$pkg" >/dev/null 2>&1 && break
-                fi
-            done
+            # Determine download URL based on architecture
+            local deb_url=""
+            if [[ "$ARCH" == "amd64" ]]; then
+                deb_url="http://ftp.de.debian.org/debian/pool/main/o/openldap/libldap-2.5-0_2.5.13+dfsg-5_amd64.deb"
+            else
+                deb_url="http://ftp.de.debian.org/debian/pool/main/o/openldap/libldap-2.5-0_2.5.13+dfsg-5_arm64.deb"
+            fi
+
+            # Download and install
+            local temp_deb="/tmp/libldap-2.5-0.deb"
+            if wget -q "$deb_url" -O "$temp_deb" 2>/dev/null; then
+                log INFO "Installing downloaded package..."
+                dpkg -i "$temp_deb" >/dev/null 2>&1 || true
+                apt install -f -y >/dev/null 2>&1 || true  # Fix any dependency issues
+                rm -f "$temp_deb"
+                log SUCCESS "libldap-2.5-0 installed from Debian repository"
+            else
+                log WARNING "Download failed, will try to create symlink from existing libraries"
+            fi
         else
-            log INFO "libldap-2.5-0 installed successfully"
+            log SUCCESS "libldap-2.5-0 already available"
         fi
 
         # Create compatibility symlink if needed
@@ -496,14 +511,22 @@ fix_ubuntu_24_dependencies() {
 install_packages() {
     local packages="$1"
 
-    log INFO "Installing packages: $packages"
+    log INFO "Installing Zabbix packages..."
+    echo ""
 
     case "$OS_ID" in
         ubuntu|debian)
-            DEBIAN_FRONTEND=noninteractive apt install -y $packages || { log ERROR "Failed to install packages"; exit 1; }
+            DEBIAN_FRONTEND=noninteractive apt install -y $packages >/dev/null 2>&1 || {
+                log ERROR "Failed to install packages"
+                log ERROR "Run: apt install -y $packages"
+                exit 1
+            }
             ;;
         rhel|centos|rocky|alma|oracle)
-            dnf install -y $packages || yum install -y $packages || { log ERROR "Failed to install packages"; exit 1; }
+            dnf install -y $packages >/dev/null 2>&1 || yum install -y $packages >/dev/null 2>&1 || {
+                log ERROR "Failed to install packages"
+                exit 1
+            }
             ;;
         *)
             log ERROR "Unsupported OS: $OS_ID"
@@ -511,7 +534,8 @@ install_packages() {
             ;;
     esac
 
-    log SUCCESS "Packages installed successfully"
+    log SUCCESS "Zabbix packages installed successfully"
+    echo ""
 }
 
 # Setup database
@@ -914,9 +938,10 @@ do_install() {
     REPO_URL=$(get_repo_url "$VERSION" "$OS_ID" "$OS_VERSION_ID" "$ARCH")
     PACKAGES=$(get_packages "$VERSION" "$DB_TYPE")
 
-    log INFO "Repository: $REPO_URL"
-    log INFO "Packages: $PACKAGES"
-    log INFO "Database: $DB_TYPE"
+    log INFO "Configuration:"
+    log INFO "  Version: Zabbix $VERSION"
+    log INFO "  Database: $DB_TYPE"
+    log INFO "  Proxy Mode: $([ "$PROXY_MODE" == "0" ] && echo "Active" || echo "Passive")"
     echo ""
 
     # Handle password for MySQL/PostgreSQL

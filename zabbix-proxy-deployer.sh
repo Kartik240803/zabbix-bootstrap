@@ -433,7 +433,7 @@ fix_ubuntu_24_dependencies() {
             log INFO "Fixing libldap dependency for Ubuntu 24.04..."
 
             # Install available libldap version
-            apt install -y libldap-common libldap-2.6-0 2>/dev/null || true
+            DEBIAN_FRONTEND=noninteractive apt install -y libldap-common libldap-2.6-0 || true
 
             # Create compatibility symlink if needed
             if [ ! -e /usr/lib/x86_64-linux-gnu/libldap-2.5.so.0 ] && [ ! -e /usr/lib/aarch64-linux-gnu/libldap-2.5.so.0 ]; then
@@ -457,9 +457,14 @@ fix_ubuntu_24_dependencies() {
 
             # Update library cache
             ldconfig 2>/dev/null || true
+
+            log INFO "Dependency fix completed"
+        else
+            log INFO "libldap-2.5-0 already available, no fix needed"
         fi
 
         log SUCCESS "Ubuntu 24.04 compatibility fixes applied"
+        echo ""
     fi
 }
 

@@ -36,6 +36,7 @@ Production-ready bash scripts for automated installation, upgrade, and managemen
 - ✅ **Plugin Support** - Optional MongoDB, MSSQL, PostgreSQL plugins
 - ✅ **Auto-Discovery** - Automatic hostname and IP detection
 - ✅ **Metadata Configuration** - Built-in host metadata setup
+- ✅ **Clean Uninstall** - Complete removal with one command
 
 ### Universal Features
 - ✅ **Automated Upgrades** - Zero-downtime upgrades with automatic backups
@@ -324,6 +325,23 @@ sudo ./zabbix-agent-deployer.sh --action upgrade --version 7.4 \
   --server-ip 192.168.1.100 --yes
 ```
 
+#### Uninstall
+```bash
+# Interactive uninstall (asks for confirmation)
+sudo ./zabbix-agent-deployer.sh --action uninstall
+
+# Non-interactive uninstall (no prompts)
+sudo ./zabbix-agent-deployer.sh --action uninstall --yes
+```
+
+**What gets removed:**
+- Service stopped and disabled
+- All agent packages and plugins
+- Configuration files from `/etc/zabbix/`
+- Log files from `/var/log/`
+- Backup directory `/opt/zabbix-config-backup/`
+- Zabbix user/group (only if no other Zabbix components installed)
+
 ### Command-Line Options
 
 #### Server Deployment Options (`zabbix-deployer.sh`)
@@ -365,13 +383,15 @@ sudo ./zabbix-agent-deployer.sh --action upgrade --version 7.4 \
 
 | Option | Required | Values | Description |
 |--------|----------|--------|-------------|
-| `--action` | Yes | install, upgrade | Action to perform |
-| `--version` | Yes | 6.0, 7.0, 7.2, 7.4 | Zabbix version to install/upgrade |
-| `--server-ip` | Yes | IP address | Zabbix server IP address |
+| `--action` | Yes | install, upgrade, uninstall | Action to perform |
+| `--version` | Yes* | 6.0, 7.0, 7.2, 7.4 | Zabbix version to install/upgrade |
+| `--server-ip` | Yes* | IP address | Zabbix server IP address |
 | `--plugins` | No | - | Install additional plugins (mongodb, mssql, postgresql) |
 | `--hostname` | No | String | Override auto-detected hostname |
 | `--yes`, `-y` | No | - | Auto-confirm all prompts (non-interactive mode) |
 | `--help`, `-h` | No | - | Show help message |
+
+\* Not required for uninstall action
 
 ## 📝 Configuration Files
 
@@ -515,6 +535,9 @@ sudo ./zabbix-agent-deployer.sh --action install \
   --server-ip 192.168.1.100 \
   --plugins \
   --yes
+
+# Uninstall Zabbix Agent
+sudo ./zabbix-agent-deployer.sh --action uninstall --yes
 ```
 
 ### Example 10: Using Master Manager
@@ -652,6 +675,29 @@ ls -la /var/lib/zabbix/
 2. Check proxy hostname matches exactly in both config and server
 3. For passive proxies, ensure server can connect to proxy port 10051
 4. Check proxy logs: `journalctl -u zabbix-proxy -f`
+
+#### Issue: "Agent uninstall leaves some files behind"
+**Solution**: The uninstall script preserves zabbix user/group if other Zabbix components are detected. To force complete removal:
+```bash
+# After running uninstall, manually remove user/group if needed
+sudo userdel zabbix
+sudo groupdel zabbix
+
+# Remove any remaining files
+sudo rm -rf /etc/zabbix/
+sudo rm -rf /var/log/zabbix/
+```
+
+#### Issue: "Cannot uninstall - agent not detected"
+**Solution**: If the agent was installed manually or the binary was removed:
+```bash
+# Manually remove packages
+sudo apt purge -y zabbix-agent* || sudo dnf remove -y zabbix-agent*
+
+# Clean up manually
+sudo systemctl stop zabbix-agent zabbix-agent2
+sudo rm -rf /etc/zabbix/
+```
 
 ### Manual Recovery
 
@@ -816,6 +862,8 @@ Generated during installation/upgrade:
 - ✅ **Automatic Database Setup**: Auto-installs and configures database servers
 - ✅ **Schema Auto-Import**: Automatically imports Zabbix proxy database schema
 - ✅ **Agent Deployment Script**: Dedicated `zabbix-agent-deployer.sh` script with plugin support
+- ✅ **Agent Uninstall**: Complete agent removal with `--action uninstall` command
+- ✅ **Smart Cleanup**: Preserves zabbix user/group if other Zabbix components are installed
 - ✅ **Configuration Preservation**: All scripts preserve configurations during upgrades
 - ✅ **Enhanced Documentation**: Comprehensive examples for all deployment scenarios
 

@@ -181,10 +181,12 @@ usage() {
     cat << EOF
 Zabbix Agent Deployment Script
 
-Usage: $0 --action <install|upgrade> --version <version> --server-ip <ip> [OPTIONS]
+Usage: $0 --action <install|upgrade|uninstall> [OPTIONS]
 
 Required:
-  --action <action>       Action: install or upgrade
+  --action <action>       Action: install, upgrade, or uninstall
+
+Required for install/upgrade:
   --version <version>     Zabbix version: 6.0, 7.0, 7.2, 7.4
   --server-ip <ip>        Zabbix server IP address
 
@@ -206,6 +208,9 @@ Examples:
 
   # Install with custom hostname
   $0 --action install --version 7.4 --server-ip 192.168.1.100 --hostname web-server-01
+
+  # Uninstall Zabbix Agent
+  $0 --action uninstall --yes
 
 EOF
     exit 0
@@ -257,25 +262,28 @@ validate_args() {
         usage
     fi
 
-    if [[ ! "$ACTION" =~ ^(install|upgrade)$ ]]; then
-        log ERROR "Invalid action: $ACTION. Must be: install or upgrade"
+    if [[ ! "$ACTION" =~ ^(install|upgrade|uninstall)$ ]]; then
+        log ERROR "Invalid action: $ACTION. Must be: install, upgrade, or uninstall"
         exit 1
     fi
 
-    if [[ -z "$VERSION" ]]; then
-        log ERROR "Missing required argument: --version"
-        usage
-    fi
+    # Version and server-ip not required for uninstall
+    if [[ "$ACTION" != "uninstall" ]]; then
+        if [[ -z "$VERSION" ]]; then
+            log ERROR "Missing required argument: --version"
+            usage
+        fi
 
-    if [[ -z "$SERVER_IP" ]]; then
-        log ERROR "Missing required argument: --server-ip"
-        usage
-    fi
+        if [[ -z "$SERVER_IP" ]]; then
+            log ERROR "Missing required argument: --server-ip"
+            usage
+        fi
 
-    # Validate version exists in JSON
-    if ! jq -e ".versions.\"$VERSION\"" "$AGENT_REPOS_JSON" > /dev/null 2>&1; then
-        log ERROR "Version $VERSION not found in configuration"
-        exit 1
+        # Validate version exists in JSON
+        if ! jq -e ".versions.\"$VERSION\"" "$AGENT_REPOS_JSON" > /dev/null 2>&1; then
+            log ERROR "Version $VERSION not found in configuration"
+            exit 1
+        fi
     fi
 }
 
@@ -613,6 +621,114 @@ display_summary() {
     echo ""
 }
 
+# Uninstall action
+do_uninstall() {
+    log INFO "========================================"
+    log INFO "Uninstalling Zabbix Agent"
+    log INFO "========================================"
+    echo ""
+
+    # Detect which agent is installed
+    detect_agent_type
+    echo ""
+
+    # Check if agent is actually installed
+    if ! command -v zabbix_agent2 &> /dev/null && ! command -v zabbix_agentd &> /dev/null; then
+        log WARNING "Zabbix Agent does not appear to be installed"
+        log INFO "Nothing to uninstall"
+        exit 0
+    fi
+
+    log INFO "Detected agent type: $AGENT_TYPE"
+    log INFO "Service name: $SERVICE_NAME"
+    echo ""
+
+    # Confirm with user
+    if [[ "$AUTO_CONFIRM" != "yes" ]]; then
+        log WARNING "This will completely remove Zabbix Agent and all configurations"
+        read -p "Continue with uninstall? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log INFO "Uninstall cancelled by user"
+            exit 0
+        fi
+    fi
+
+    # Stop and disable service
+    log INFO "Stopping and disabling $SERVICE_NAME service..."
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+    log SUCCESS "Service stopped and disabled"
+
+    # Remove packages
+    log INFO "Removing Zabbix Agent packages..."
+    case "$OS_ID" in
+        ubuntu|debian)
+            if [[ "$AGENT_TYPE" == "agent2" ]]; then
+                apt purge -y zabbix-agent2 zabbix-agent2-plugin-* 2>/dev/null || apt remove -y zabbix-agent2 zabbix-agent2-plugin-* 2>/dev/null || true
+            else
+                apt purge -y zabbix-agent zabbix-sender 2>/dev/null || apt remove -y zabbix-agent zabbix-sender 2>/dev/null || true
+            fi
+            apt autoremove -y 2>/dev/null || true
+            ;;
+        rhel|centos|rocky|alma|oracle)
+            if [[ "$AGENT_TYPE" == "agent2" ]]; then
+                dnf remove -y zabbix-agent2 zabbix-agent2-plugin-* 2>/dev/null || yum remove -y zabbix-agent2 zabbix-agent2-plugin-* 2>/dev/null || true
+            else
+                dnf remove -y zabbix-agent zabbix-sender 2>/dev/null || yum remove -y zabbix-agent zabbix-sender 2>/dev/null || true
+            fi
+            ;;
+        *)
+            log WARNING "Unsupported OS for package removal: $OS_ID"
+            log INFO "Please remove packages manually"
+            ;;
+    esac
+    log SUCCESS "Packages removed"
+
+    # Remove configuration files
+    log INFO "Removing configuration files..."
+    rm -f "$CONFIG_FILE" 2>/dev/null || true
+    rm -f "$CONFIG_FILE.pre-configure.bak" 2>/dev/null || true
+    rm -f "$CONFIG_FILE."*.bak 2>/dev/null || true
+    rm -rf /etc/zabbix/zabbix_agent*.d/ 2>/dev/null || true
+    log SUCCESS "Configuration files removed"
+
+    # Remove logs
+    log INFO "Removing log files..."
+    rm -f "$LOG_FILE" 2>/dev/null || true
+    rm -rf /var/log/zabbix/ 2>/dev/null || true
+    log SUCCESS "Log files removed"
+
+    # Remove backup directory
+    log INFO "Removing backup directory..."
+    rm -rf "$CONFIG_BACKUP_DIR" 2>/dev/null || true
+    log SUCCESS "Backup directory removed"
+
+    # Remove user and group (optional - only if not used by other Zabbix components)
+    if ! command -v zabbix_server &> /dev/null && ! command -v zabbix_proxy &> /dev/null; then
+        log INFO "Removing zabbix user and group..."
+        userdel zabbix 2>/dev/null || true
+        groupdel zabbix 2>/dev/null || true
+        log SUCCESS "User and group removed"
+    else
+        log INFO "Keeping zabbix user/group (other Zabbix components detected)"
+    fi
+
+    echo ""
+    log SUCCESS "======================================"
+    log SUCCESS "Zabbix Agent Uninstalled Successfully!"
+    log SUCCESS "======================================"
+    echo ""
+    log INFO "Summary:"
+    log INFO "  Agent type: $AGENT_TYPE"
+    log INFO "  Service: $SERVICE_NAME (stopped and disabled)"
+    log INFO "  Packages: Removed"
+    log INFO "  Configuration: Removed"
+    log INFO "  Logs: Removed"
+    log INFO "  Backups: Removed"
+    echo ""
+}
+
 # Install action
 do_install() {
     log INFO "========================================"
@@ -775,10 +891,12 @@ main() {
     parse_args "$@"
     validate_args
 
-    # Check if JSON file exists
-    if [[ ! -f "$AGENT_REPOS_JSON" ]]; then
-        log ERROR "Configuration file not found: $AGENT_REPOS_JSON"
-        exit 1
+    # Check if JSON file exists (only for install/upgrade)
+    if [[ "$ACTION" != "uninstall" ]]; then
+        if [[ ! -f "$AGENT_REPOS_JSON" ]]; then
+            log ERROR "Configuration file not found: $AGENT_REPOS_JSON"
+            exit 1
+        fi
     fi
 
     # Execute action
@@ -788,6 +906,9 @@ main() {
             ;;
         upgrade)
             do_upgrade
+            ;;
+        uninstall)
+            do_uninstall
             ;;
         *)
             log ERROR "Invalid action: $ACTION"

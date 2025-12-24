@@ -429,57 +429,55 @@ fix_ubuntu_24_dependencies() {
         log INFO "Applying Ubuntu 24.04 compatibility fixes for Zabbix $VERSION..."
 
         # Fix libldap dependency issue
-        if ! dpkg -l | grep -q "libldap-2.5-0"; then
-            log INFO "Fixing libldap dependency for Ubuntu 24.04..."
+        log INFO "Checking libldap dependency..."
 
-            # Install libldap-common first
-            DEBIAN_FRONTEND=noninteractive apt install -y libldap-common 2>/dev/null || true
-
-            # Find available libldap package
-            local available_libldap=$(apt-cache search '^libldap-[0-9]' | grep -oP 'libldap-[0-9\.]+' | sort -V | tail -1)
-
-            if [ -n "$available_libldap" ]; then
-                log INFO "Installing $available_libldap..."
-                DEBIAN_FRONTEND=noninteractive apt install -y "$available_libldap" 2>/dev/null || true
-            fi
-
-            # Create compatibility symlink
-            local libldap_path=""
-            local target_dir=""
-
-            if [[ "$ARCH" == "amd64" ]]; then
-                target_dir="/usr/lib/x86_64-linux-gnu"
-            else
-                target_dir="/usr/lib/aarch64-linux-gnu"
-            fi
-
-            # Check if symlink already exists
-            if [ ! -e "$target_dir/libldap-2.5.so.0" ]; then
-                # Find the newest libldap library
-                libldap_path=$(ls -v "$target_dir"/libldap-2.*.so.* 2>/dev/null | tail -1)
-
-                if [ -n "$libldap_path" ]; then
-                    ln -sf "$libldap_path" "$target_dir/libldap-2.5.so.0"
-                    log SUCCESS "Created libldap compatibility symlink: $target_dir/libldap-2.5.so.0 -> $libldap_path"
-                else
-                    log WARNING "Could not find libldap library to create symlink"
-                fi
-            else
-                log INFO "libldap-2.5.so.0 already exists"
-            fi
-
-            # Also create the base .so symlink if needed
-            if [ ! -e "$target_dir/libldap.so.2" ] && [ -n "$libldap_path" ]; then
-                ln -sf "$libldap_path" "$target_dir/libldap.so.2"
-            fi
-
-            # Update library cache
-            ldconfig 2>/dev/null || true
-
-            log INFO "Dependency fix completed"
+        # Determine library directory
+        local target_dir=""
+        if [[ "$ARCH" == "amd64" ]]; then
+            target_dir="/usr/lib/x86_64-linux-gnu"
         else
-            log INFO "libldap-2.5-0 already available, no fix needed"
+            target_dir="/usr/lib/aarch64-linux-gnu"
         fi
+
+        # Try to install libldap packages
+        log INFO "Installing libldap packages..."
+        DEBIAN_FRONTEND=noninteractive apt install -y libldap-common libldap-2.5-0 2>&1 | tail -3
+
+        # If libldap-2.5-0 is not available, try other versions
+        if ! dpkg -l | grep -q "libldap-2.5-0"; then
+            log WARNING "libldap-2.5-0 not available, searching for alternatives..."
+
+            # Try common alternatives
+            for pkg in libldap-2.6-0 libldap2 libldap; do
+                if apt-cache show "$pkg" >/dev/null 2>&1; then
+                    log INFO "Found alternative: $pkg"
+                    DEBIAN_FRONTEND=noninteractive apt install -y "$pkg" 2>&1 | tail -2
+                    break
+                fi
+            done
+        fi
+
+        # Create compatibility symlink if needed
+        if [ ! -e "$target_dir/libldap-2.5.so.0" ]; then
+            log INFO "Creating compatibility symlink..."
+
+            # Find any available libldap library
+            local libldap_path=$(find "$target_dir" -name "libldap-*.so.*" -type f 2>/dev/null | sort -V | tail -1)
+
+            if [ -n "$libldap_path" ]; then
+                ln -sf "$libldap_path" "$target_dir/libldap-2.5.so.0"
+                log SUCCESS "Created symlink: libldap-2.5.so.0 -> $(basename $libldap_path)"
+            else
+                log WARNING "No libldap library found for symlink"
+            fi
+        else
+            log INFO "libldap-2.5.so.0 already exists"
+        fi
+
+        # Update library cache
+        ldconfig 2>/dev/null || true
+
+        log SUCCESS "Dependency check completed"
 
         log SUCCESS "Ubuntu 24.04 compatibility fixes applied"
         echo ""

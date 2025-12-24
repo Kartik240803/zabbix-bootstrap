@@ -432,27 +432,45 @@ fix_ubuntu_24_dependencies() {
         if ! dpkg -l | grep -q "libldap-2.5-0"; then
             log INFO "Fixing libldap dependency for Ubuntu 24.04..."
 
-            # Install available libldap version
-            DEBIAN_FRONTEND=noninteractive apt install -y libldap-common libldap-2.6-0 || true
+            # Install libldap-common first
+            DEBIAN_FRONTEND=noninteractive apt install -y libldap-common 2>/dev/null || true
 
-            # Create compatibility symlink if needed
-            if [ ! -e /usr/lib/x86_64-linux-gnu/libldap-2.5.so.0 ] && [ ! -e /usr/lib/aarch64-linux-gnu/libldap-2.5.so.0 ]; then
-                local libldap_path=""
+            # Find available libldap package
+            local available_libldap=$(apt-cache search '^libldap-[0-9]' | grep -oP 'libldap-[0-9\.]+' | sort -V | tail -1)
 
-                # Find the installed libldap
-                if [[ "$ARCH" == "amd64" ]]; then
-                    libldap_path=$(ls /usr/lib/x86_64-linux-gnu/libldap-2.*.so.* 2>/dev/null | head -1)
-                    if [ -n "$libldap_path" ]; then
-                        ln -sf "$libldap_path" /usr/lib/x86_64-linux-gnu/libldap-2.5.so.0
-                        log SUCCESS "Created libldap compatibility symlink"
-                    fi
+            if [ -n "$available_libldap" ]; then
+                log INFO "Installing $available_libldap..."
+                DEBIAN_FRONTEND=noninteractive apt install -y "$available_libldap" 2>/dev/null || true
+            fi
+
+            # Create compatibility symlink
+            local libldap_path=""
+            local target_dir=""
+
+            if [[ "$ARCH" == "amd64" ]]; then
+                target_dir="/usr/lib/x86_64-linux-gnu"
+            else
+                target_dir="/usr/lib/aarch64-linux-gnu"
+            fi
+
+            # Check if symlink already exists
+            if [ ! -e "$target_dir/libldap-2.5.so.0" ]; then
+                # Find the newest libldap library
+                libldap_path=$(ls -v "$target_dir"/libldap-2.*.so.* 2>/dev/null | tail -1)
+
+                if [ -n "$libldap_path" ]; then
+                    ln -sf "$libldap_path" "$target_dir/libldap-2.5.so.0"
+                    log SUCCESS "Created libldap compatibility symlink: $target_dir/libldap-2.5.so.0 -> $libldap_path"
                 else
-                    libldap_path=$(ls /usr/lib/aarch64-linux-gnu/libldap-2.*.so.* 2>/dev/null | head -1)
-                    if [ -n "$libldap_path" ]; then
-                        ln -sf "$libldap_path" /usr/lib/aarch64-linux-gnu/libldap-2.5.so.0
-                        log SUCCESS "Created libldap compatibility symlink"
-                    fi
+                    log WARNING "Could not find libldap library to create symlink"
                 fi
+            else
+                log INFO "libldap-2.5.so.0 already exists"
+            fi
+
+            # Also create the base .so symlink if needed
+            if [ ! -e "$target_dir/libldap.so.2" ] && [ -n "$libldap_path" ]; then
+                ln -sf "$libldap_path" "$target_dir/libldap.so.2"
             fi
 
             # Update library cache

@@ -301,6 +301,24 @@ sudo ./zabbix-proxy-deployer.sh --action upgrade --version 7.4 \
   --server-ip 192.168.1.100 --db sqlite --yes
 ```
 
+#### Uninstall
+```bash
+# Interactive uninstall (asks for confirmation)
+sudo ./zabbix-proxy-deployer.sh --action uninstall
+
+# Non-interactive uninstall (no prompts)
+sudo ./zabbix-proxy-deployer.sh --action uninstall --yes
+```
+
+**What gets removed:**
+- Service stopped and disabled
+- All proxy packages (zabbix-proxy-*, zabbix-sql-scripts)
+- Configuration files from `/etc/zabbix/`
+- Log files from `/var/log/`
+- Backup directory `/opt/zabbix-config-backup/`
+- Zabbix user/group (only if no other Zabbix components installed)
+- **Database NOT removed** (manual cleanup instructions provided for safety)
+
 ### Zabbix Agent Deployment
 
 #### Installation

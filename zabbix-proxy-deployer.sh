@@ -160,10 +160,12 @@ usage() {
     cat << EOF
 Zabbix Proxy Deployment Script
 
-Usage: $0 --action <install|upgrade> --version <version> --server-ip <ip> --db <type> [OPTIONS]
+Usage: $0 --action <install|upgrade|uninstall> [OPTIONS]
 
 Required:
-  --action <action>       Action: install or upgrade
+  --action <action>       Action: install, upgrade, or uninstall
+
+Required for install/upgrade:
   --version <version>     Zabbix version: 6.0, 7.0, 7.2, 7.4
   --server-ip <ip>        Zabbix server IP address
   --db <type>             Database type: mysql, pgsql, sqlite
@@ -190,6 +192,9 @@ Examples:
 
   # Upgrade Proxy (preserves configuration)
   $0 --action upgrade --version 7.4 --server-ip 192.168.1.100 --db mysql --yes
+
+  # Uninstall Proxy
+  $0 --action uninstall --yes
 
   # Install with custom hostname and passive mode
   $0 --action install --version 7.4 --server-ip 192.168.1.100 --db mysql --hostname proxy-01 --proxy-mode 1 --default
@@ -256,29 +261,32 @@ validate_args() {
         usage
     fi
 
-    if [[ ! "$ACTION" =~ ^(install|upgrade)$ ]]; then
-        log ERROR "Invalid action: $ACTION. Must be: install or upgrade"
+    if [[ ! "$ACTION" =~ ^(install|upgrade|uninstall)$ ]]; then
+        log ERROR "Invalid action: $ACTION. Must be: install, upgrade, or uninstall"
         exit 1
     fi
 
-    if [[ -z "$VERSION" ]]; then
-        log ERROR "Missing required argument: --version"
-        usage
-    fi
+    # Version, server-ip, and db not required for uninstall
+    if [[ "$ACTION" != "uninstall" ]]; then
+        if [[ -z "$VERSION" ]]; then
+            log ERROR "Missing required argument: --version"
+            usage
+        fi
 
-    if [[ -z "$SERVER_IP" ]]; then
-        log ERROR "Missing required argument: --server-ip"
-        usage
-    fi
+        if [[ -z "$SERVER_IP" ]]; then
+            log ERROR "Missing required argument: --server-ip"
+            usage
+        fi
 
-    if [[ -z "$DB_TYPE" ]]; then
-        log ERROR "Missing required argument: --db"
-        usage
-    fi
+        if [[ -z "$DB_TYPE" ]]; then
+            log ERROR "Missing required argument: --db"
+            usage
+        fi
 
-    if [[ ! "$DB_TYPE" =~ ^(mysql|pgsql|sqlite)$ ]]; then
-        log ERROR "Invalid database type: $DB_TYPE. Must be: mysql, pgsql, or sqlite"
-        exit 1
+        if [[ ! "$DB_TYPE" =~ ^(mysql|pgsql|sqlite)$ ]]; then
+            log ERROR "Invalid database type: $DB_TYPE. Must be: mysql, pgsql, or sqlite"
+            exit 1
+        fi
     fi
 
     # Validate password mode for install action with mysql/pgsql
@@ -923,6 +931,145 @@ display_summary() {
     echo ""
 }
 
+# Uninstall action
+do_uninstall() {
+    log INFO "========================================"
+    log INFO "Uninstalling Zabbix Proxy"
+    log INFO "========================================"
+    echo ""
+
+    # Check if proxy is installed
+    if ! command -v zabbix_proxy &> /dev/null; then
+        log WARNING "Zabbix Proxy does not appear to be installed"
+        log INFO "Nothing to uninstall"
+        exit 0
+    fi
+
+    # Detect system metadata
+    detect_system_metadata
+    echo ""
+
+    # Try to detect database type from config
+    local detected_db=""
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if grep -q "DBName=.*\.db" "$CONFIG_FILE"; then
+            detected_db="sqlite"
+        elif grep -q "DBName=" "$CONFIG_FILE"; then
+            # Could be MySQL or PostgreSQL
+            detected_db="mysql/pgsql"
+        fi
+    fi
+
+    log INFO "Detected configuration:"
+    log INFO "  Service: zabbix-proxy"
+    if [[ -n "$detected_db" ]]; then
+        log INFO "  Database: $detected_db"
+    fi
+    echo ""
+
+    # Confirm with user
+    if [[ "$AUTO_CONFIRM" != "yes" ]]; then
+        log WARNING "This will completely remove Zabbix Proxy and all configurations"
+        log WARNING "Database will NOT be removed (manual cleanup required)"
+        read -p "Continue with uninstall? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log INFO "Uninstall cancelled by user"
+            exit 0
+        fi
+    fi
+
+    # Stop and disable service
+    log INFO "Stopping and disabling zabbix-proxy service..."
+    systemctl stop zabbix-proxy 2>/dev/null || true
+    systemctl disable zabbix-proxy 2>/dev/null || true
+    log SUCCESS "Service stopped and disabled"
+    echo ""
+
+    # Remove packages
+    log INFO "Removing Zabbix Proxy packages..."
+    case "$OS_ID" in
+        ubuntu|debian)
+            apt purge -y zabbix-proxy-* zabbix-sql-scripts 2>/dev/null || apt remove -y zabbix-proxy-* zabbix-sql-scripts 2>/dev/null || true
+            apt autoremove -y >/dev/null 2>&1 || true
+            ;;
+        rhel|centos|rocky|alma|oracle)
+            dnf remove -y zabbix-proxy-* zabbix-sql-scripts 2>/dev/null || yum remove -y zabbix-proxy-* zabbix-sql-scripts 2>/dev/null || true
+            ;;
+        *)
+            log WARNING "Unsupported OS for package removal: $OS_ID"
+            log INFO "Please remove packages manually"
+            ;;
+    esac
+    log SUCCESS "Packages removed"
+    echo ""
+
+    # Remove configuration files
+    log INFO "Removing configuration files..."
+    rm -f "$CONFIG_FILE" 2>/dev/null || true
+    rm -f "$CONFIG_FILE.pre-configure.bak" 2>/dev/null || true
+    rm -f "$CONFIG_FILE."*.bak 2>/dev/null || true
+    log SUCCESS "Configuration files removed"
+    echo ""
+
+    # Remove logs
+    log INFO "Removing log files..."
+    rm -f "$LOG_FILE" 2>/dev/null || true
+    rm -rf /var/log/zabbix/zabbix_proxy.log* 2>/dev/null || true
+    log SUCCESS "Log files removed"
+    echo ""
+
+    # Remove backup directory
+    log INFO "Removing backup directory..."
+    rm -rf "$CONFIG_BACKUP_DIR" 2>/dev/null || true
+    log SUCCESS "Backup directory removed"
+    echo ""
+
+    # Note about database
+    log INFO "========================================"
+    log INFO "Database Cleanup (Manual)"
+    log INFO "========================================"
+    echo ""
+    log WARNING "The proxy database was NOT automatically removed"
+    log INFO "To remove the database manually:"
+    echo ""
+    log INFO "For MySQL:"
+    log INFO "  mysql -uroot -e \"DROP DATABASE zabbix_proxy;\""
+    log INFO "  mysql -uroot -e \"DROP USER 'zabbix'@'localhost';\""
+    echo ""
+    log INFO "For PostgreSQL:"
+    log INFO "  sudo -u postgres psql -c \"DROP DATABASE zabbix_proxy;\""
+    log INFO "  sudo -u postgres psql -c \"DROP USER zabbix;\""
+    echo ""
+    log INFO "For SQLite:"
+    log INFO "  rm -f /var/lib/zabbix/zabbix_proxy.db"
+    echo ""
+
+    # Remove user and group (optional - only if not used by other Zabbix components)
+    if ! command -v zabbix_server &> /dev/null && ! command -v zabbix_agent2 &> /dev/null && ! command -v zabbix_agentd &> /dev/null; then
+        log INFO "Removing zabbix user and group..."
+        userdel zabbix 2>/dev/null || true
+        groupdel zabbix 2>/dev/null || true
+        log SUCCESS "User and group removed"
+    else
+        log INFO "Keeping zabbix user/group (other Zabbix components detected)"
+    fi
+    echo ""
+
+    log SUCCESS "======================================"
+    log SUCCESS "Zabbix Proxy Uninstalled Successfully!"
+    log SUCCESS "======================================"
+    echo ""
+    log INFO "Summary:"
+    log INFO "  Service: zabbix-proxy (stopped and disabled)"
+    log INFO "  Packages: Removed"
+    log INFO "  Configuration: Removed"
+    log INFO "  Logs: Removed"
+    log INFO "  Backups: Removed"
+    log INFO "  Database: NOT removed (manual cleanup required)"
+    echo ""
+}
+
 # Install action
 do_install() {
     log INFO "========================================"
@@ -1109,10 +1256,12 @@ main() {
     parse_args "$@"
     validate_args
 
-    # Check if JSON file exists
-    if [[ ! -f "$PROXY_REPOS_JSON" ]]; then
-        log ERROR "Configuration file not found: $PROXY_REPOS_JSON"
-        exit 1
+    # Check if JSON file exists (only for install/upgrade)
+    if [[ "$ACTION" != "uninstall" ]]; then
+        if [[ ! -f "$PROXY_REPOS_JSON" ]]; then
+            log ERROR "Configuration file not found: $PROXY_REPOS_JSON"
+            exit 1
+        fi
     fi
 
     # Execute action
@@ -1122,6 +1271,9 @@ main() {
             ;;
         upgrade)
             do_upgrade
+            ;;
+        uninstall)
+            do_uninstall
             ;;
         *)
             log ERROR "Invalid action: $ACTION"

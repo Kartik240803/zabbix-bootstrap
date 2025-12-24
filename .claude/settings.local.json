@@ -12,7 +12,12 @@
       "Bash(tee:*)",
       "Bash(curl:*)",
       "Bash(chmod:*)",
-      "Bash(./zabbix-agent-deployer.sh:*)"
+      "Bash(./zabbix-agent-deployer.sh:*)",
+      "Bash(for version in 6.0 7.0 7.2 7.4)",
+      "Bash(do echo -n \"Version $version: \")",
+      "Bash(jq:*)",
+      "Bash(done)",
+      "Bash(./zabbix-proxy-deployer.sh:*)"
     ]
   }
 }

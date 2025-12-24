@@ -317,7 +317,23 @@ get_repo_url() {
     local url=$(jq -r ".versions.\"$version\".\"$os\".\"$os_version\".\"$arch\"" "$PROXY_REPOS_JSON" 2>/dev/null)
 
     if [[ "$url" == "null" || -z "$url" ]]; then
-        log ERROR "No repository URL found for: $os $os_version $arch (version $version)"
+        echo ""
+        log ERROR "========================================="
+        log ERROR "Unsupported OS/Version Combination"
+        log ERROR "========================================="
+        log ERROR "Zabbix version $version does not support:"
+        log ERROR "  OS: $os $os_version"
+        log ERROR "  Architecture: $arch"
+        echo ""
+        log INFO "Supported versions for $os $os_version:"
+        # Check which versions support this OS
+        for v in 6.0 7.0 7.2 7.4; do
+            if jq -e ".versions.\"$v\".\"$os\".\"$os_version\"" "$PROXY_REPOS_JSON" >/dev/null 2>&1; then
+                log INFO "  ✓ Version $v"
+            fi
+        done
+        echo ""
+        log INFO "Please use a supported Zabbix version or upgrade your OS."
         exit 1
     fi
 

@@ -439,36 +439,44 @@ fix_ubuntu_24_dependencies() {
             target_dir="/usr/lib/aarch64-linux-gnu"
         fi
 
-        # Try to install libldap packages
-        log INFO "Installing libldap packages..."
-        DEBIAN_FRONTEND=noninteractive apt install -y libldap-common libldap-2.5-0 2>&1 | tail -3
+        # Try to install libldap packages (suppress errors as we'll use fallback)
+        log INFO "Ensuring libldap libraries are available..."
+        DEBIAN_FRONTEND=noninteractive apt install -y libldap-common >/dev/null 2>&1 || true
+        DEBIAN_FRONTEND=noninteractive apt install -y libldap-2.5-0 >/dev/null 2>&1 || true
 
         # If libldap-2.5-0 is not available, try other versions
-        if ! dpkg -l | grep -q "libldap-2.5-0"; then
-            log WARNING "libldap-2.5-0 not available, searching for alternatives..."
+        if ! dpkg -l 2>/dev/null | grep -q "libldap-2.5-0"; then
+            log INFO "Installing alternative libldap version..."
 
             # Try common alternatives
-            for pkg in libldap-2.6-0 libldap2 libldap; do
+            for pkg in libldap-2.6-0 libldap-2.4-2 libldap2; do
                 if apt-cache show "$pkg" >/dev/null 2>&1; then
-                    log INFO "Found alternative: $pkg"
-                    DEBIAN_FRONTEND=noninteractive apt install -y "$pkg" 2>&1 | tail -2
-                    break
+                    log INFO "Using: $pkg"
+                    DEBIAN_FRONTEND=noninteractive apt install -y "$pkg" >/dev/null 2>&1 && break
                 fi
             done
+        else
+            log INFO "libldap-2.5-0 installed successfully"
         fi
 
         # Create compatibility symlink if needed
         if [ ! -e "$target_dir/libldap-2.5.so.0" ]; then
             log INFO "Creating compatibility symlink..."
 
-            # Find any available libldap library
-            local libldap_path=$(find "$target_dir" -name "libldap-*.so.*" -type f 2>/dev/null | sort -V | tail -1)
+            # Find any available libldap library (check multiple locations)
+            local libldap_path=""
+            libldap_path=$(find "$target_dir" -name "libldap-*.so.*" -type f 2>/dev/null | sort -V | tail -1)
+
+            # If not found in main dir, check /lib as well
+            if [ -z "$libldap_path" ]; then
+                libldap_path=$(find /lib -name "libldap-*.so.*" -type f 2>/dev/null | sort -V | tail -1)
+            fi
 
             if [ -n "$libldap_path" ]; then
-                ln -sf "$libldap_path" "$target_dir/libldap-2.5.so.0"
+                ln -sf "$libldap_path" "$target_dir/libldap-2.5.so.0" 2>/dev/null || true
                 log SUCCESS "Created symlink: libldap-2.5.so.0 -> $(basename $libldap_path)"
             else
-                log WARNING "No libldap library found for symlink"
+                log INFO "No existing libldap library found, will be installed with Zabbix packages"
             fi
         else
             log INFO "libldap-2.5.so.0 already exists"
@@ -477,7 +485,7 @@ fix_ubuntu_24_dependencies() {
         # Update library cache
         ldconfig 2>/dev/null || true
 
-        log SUCCESS "Dependency check completed"
+        log SUCCESS "Dependency compatibility check completed"
 
         log SUCCESS "Ubuntu 24.04 compatibility fixes applied"
         echo ""

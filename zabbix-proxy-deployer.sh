@@ -422,6 +422,47 @@ install_repository() {
     log SUCCESS "Repository installed successfully"
 }
 
+# Fix dependencies for Ubuntu 24.04 when using older Zabbix versions
+fix_ubuntu_24_dependencies() {
+    # Only apply fix for Ubuntu 24.04 with Zabbix 6.0 or 7.0
+    if [[ "$OS_ID" == "ubuntu" && "$OS_VERSION_ID" == "24.04" && ("$VERSION" == "6.0" || "$VERSION" == "7.0") ]]; then
+        log INFO "Applying Ubuntu 24.04 compatibility fixes for Zabbix $VERSION..."
+
+        # Fix libldap dependency issue
+        if ! dpkg -l | grep -q "libldap-2.5-0"; then
+            log INFO "Fixing libldap dependency for Ubuntu 24.04..."
+
+            # Install available libldap version
+            apt install -y libldap-common libldap-2.6-0 2>/dev/null || true
+
+            # Create compatibility symlink if needed
+            if [ ! -e /usr/lib/x86_64-linux-gnu/libldap-2.5.so.0 ] && [ ! -e /usr/lib/aarch64-linux-gnu/libldap-2.5.so.0 ]; then
+                local libldap_path=""
+
+                # Find the installed libldap
+                if [[ "$ARCH" == "amd64" ]]; then
+                    libldap_path=$(ls /usr/lib/x86_64-linux-gnu/libldap-2.*.so.* 2>/dev/null | head -1)
+                    if [ -n "$libldap_path" ]; then
+                        ln -sf "$libldap_path" /usr/lib/x86_64-linux-gnu/libldap-2.5.so.0
+                        log SUCCESS "Created libldap compatibility symlink"
+                    fi
+                else
+                    libldap_path=$(ls /usr/lib/aarch64-linux-gnu/libldap-2.*.so.* 2>/dev/null | head -1)
+                    if [ -n "$libldap_path" ]; then
+                        ln -sf "$libldap_path" /usr/lib/aarch64-linux-gnu/libldap-2.5.so.0
+                        log SUCCESS "Created libldap compatibility symlink"
+                    fi
+                fi
+            fi
+
+            # Update library cache
+            ldconfig 2>/dev/null || true
+        fi
+
+        log SUCCESS "Ubuntu 24.04 compatibility fixes applied"
+    fi
+}
+
 # Install packages
 install_packages() {
     local packages="$1"
@@ -886,6 +927,9 @@ do_install() {
     # Install repository
     install_repository "$REPO_URL"
 
+    # Fix Ubuntu 24.04 dependencies if needed
+    fix_ubuntu_24_dependencies
+
     # Install packages
     install_packages "$PACKAGES"
 
@@ -959,6 +1003,9 @@ do_upgrade() {
 
     # Install new repository
     install_repository "$REPO_URL"
+
+    # Fix Ubuntu 24.04 dependencies if needed
+    fix_ubuntu_24_dependencies
 
     # Upgrade packages
     log INFO "Upgrading packages: $PACKAGES"

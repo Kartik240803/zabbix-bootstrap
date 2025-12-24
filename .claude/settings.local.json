@@ -10,7 +10,8 @@
       "Bash(./zabbix-deployer.sh:*)",
       "Bash(yes:*)",
       "Bash(tee:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(chmod:*)"
     ]
   }
 }

@@ -25,6 +25,8 @@ INSTALL_PLUGINS="no"
 AUTO_CONFIRM="no"
 DETECTED_HOSTNAME=""
 DETECTED_IP=""
+AGENT_TYPE=""  # Will be 'agent' or 'agent2'
+SERVICE_NAME=""  # Will be 'zabbix-agent' or 'zabbix-agent2'
 
 # Color codes for output
 RED='\033[0;31m'
@@ -149,6 +151,29 @@ detect_system_metadata() {
     # Kernel version
     KERNEL_VERSION=$(uname -r)
     log METADATA "Kernel: $KERNEL_VERSION"
+}
+
+# Detect which agent type is installed
+detect_agent_type() {
+    # Check if agent2 is installed
+    if command -v zabbix_agent2 &> /dev/null || systemctl list-unit-files | grep -q "zabbix-agent2.service"; then
+        AGENT_TYPE="agent2"
+        CONFIG_FILE="/etc/zabbix/zabbix_agent2.conf"
+        SERVICE_NAME="zabbix-agent2"
+        log INFO "Detected: Zabbix Agent 2"
+    # Check if agent1 is installed
+    elif command -v zabbix_agentd &> /dev/null || systemctl list-unit-files | grep -q "zabbix-agent.service"; then
+        AGENT_TYPE="agent"
+        CONFIG_FILE="/etc/zabbix/zabbix_agentd.conf"
+        SERVICE_NAME="zabbix-agent"
+        log INFO "Detected: Zabbix Agent 1"
+    else
+        # Default to agent2 for new installations
+        AGENT_TYPE="agent2"
+        CONFIG_FILE="/etc/zabbix/zabbix_agent2.conf"
+        SERVICE_NAME="zabbix-agent2"
+        log INFO "No existing agent detected, will install: Zabbix Agent 2"
+    fi
 }
 
 # Display usage
@@ -406,7 +431,7 @@ configure_agent() {
     local server_ip="$1"
     local hostname="$2"
 
-    log INFO "Configuring Zabbix Agent..."
+    log INFO "Configuring Zabbix Agent ($AGENT_TYPE)..."
 
     # Check if config file exists
     if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -414,25 +439,64 @@ configure_agent() {
         exit 1
     fi
 
-    # Update or add configuration parameters
-    sed -i "s/^Server=.*/Server=$server_ip/" "$CONFIG_FILE"
-    sed -i "s/^ServerActive=.*/ServerActive=$server_ip/" "$CONFIG_FILE"
-    sed -i "s/^Hostname=.*/Hostname=$hostname/" "$CONFIG_FILE"
+    # Backup original config
+    cp "$CONFIG_FILE" "$CONFIG_FILE.pre-configure.bak"
+
+    # Update Server parameter (or add if not present)
+    if grep -q "^Server=" "$CONFIG_FILE"; then
+        sed -i "s/^Server=.*/Server=$server_ip/" "$CONFIG_FILE"
+    elif grep -q "^# Server=" "$CONFIG_FILE"; then
+        sed -i "s/^# Server=.*/Server=$server_ip/" "$CONFIG_FILE"
+    else
+        echo "Server=$server_ip" >> "$CONFIG_FILE"
+    fi
+
+    # Update ServerActive parameter (or add if not present)
+    if grep -q "^ServerActive=" "$CONFIG_FILE"; then
+        sed -i "s/^ServerActive=.*/ServerActive=$server_ip/" "$CONFIG_FILE"
+    elif grep -q "^# ServerActive=" "$CONFIG_FILE"; then
+        sed -i "s/^# ServerActive=.*/ServerActive=$server_ip/" "$CONFIG_FILE"
+    else
+        echo "ServerActive=$server_ip" >> "$CONFIG_FILE"
+    fi
+
+    # Update Hostname parameter (or add if not present)
+    if grep -q "^Hostname=" "$CONFIG_FILE"; then
+        sed -i "s/^Hostname=.*/Hostname=$hostname/" "$CONFIG_FILE"
+    elif grep -q "^# Hostname=" "$CONFIG_FILE"; then
+        sed -i "s/^# Hostname=.*/Hostname=$hostname/" "$CONFIG_FILE"
+    else
+        echo "Hostname=$hostname" >> "$CONFIG_FILE"
+    fi
 
     # Add ListenIP if not present
     if ! grep -q "^ListenIP=" "$CONFIG_FILE"; then
-        echo "ListenIP=0.0.0.0" >> "$CONFIG_FILE"
+        if grep -q "^# ListenIP=" "$CONFIG_FILE"; then
+            sed -i "s/^# ListenIP=.*/ListenIP=0.0.0.0/" "$CONFIG_FILE"
+        else
+            echo "ListenIP=0.0.0.0" >> "$CONFIG_FILE"
+        fi
     fi
 
-    # Add custom metadata
-    if ! grep -q "^HostMetadata=" "$CONFIG_FILE"; then
-        echo "HostMetadata=Linux $OS_PRETTY_NAME" >> "$CONFIG_FILE"
+    # Add HostMetadataItem (for dynamic metadata using system.uname)
+    if ! grep -q "^HostMetadataItem=" "$CONFIG_FILE"; then
+        if grep -q "^# HostMetadataItem=" "$CONFIG_FILE"; then
+            sed -i "s/^# HostMetadataItem=.*/HostMetadataItem=system.uname/" "$CONFIG_FILE"
+        else
+            echo "HostMetadataItem=system.uname" >> "$CONFIG_FILE"
+        fi
+        log INFO "  Added: HostMetadataItem=system.uname"
+    else
+        sed -i "s/^HostMetadataItem=.*/HostMetadataItem=system.uname/" "$CONFIG_FILE"
+        log INFO "  Updated: HostMetadataItem=system.uname"
     fi
 
     log SUCCESS "Agent configured successfully"
+    log INFO "  Config file: $CONFIG_FILE"
     log INFO "  Server: $server_ip"
     log INFO "  ServerActive: $server_ip"
     log INFO "  Hostname: $hostname"
+    log INFO "  HostMetadataItem: system.uname"
 }
 
 # Restore configuration values from backup
@@ -477,19 +541,19 @@ restore_configuration_values() {
 
 # Start and enable service
 start_service() {
-    log INFO "Starting and enabling Zabbix Agent service..."
+    log INFO "Starting and enabling $SERVICE_NAME service..."
 
     systemctl daemon-reload
-    systemctl enable zabbix-agent2 || { log ERROR "Failed to enable service"; exit 1; }
-    systemctl restart zabbix-agent2 || { log ERROR "Failed to start service"; exit 1; }
+    systemctl enable "$SERVICE_NAME" || { log ERROR "Failed to enable service"; exit 1; }
+    systemctl restart "$SERVICE_NAME" || { log ERROR "Failed to start service"; exit 1; }
 
     # Wait a moment and check status
     sleep 2
-    if systemctl is-active --quiet zabbix-agent2; then
-        log SUCCESS "Zabbix Agent service is running"
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        log SUCCESS "$SERVICE_NAME service is running"
     else
-        log ERROR "Zabbix Agent service failed to start"
-        log ERROR "Check logs: journalctl -u zabbix-agent2 -n 50"
+        log ERROR "$SERVICE_NAME service failed to start"
+        log ERROR "Check logs: journalctl -u $SERVICE_NAME -n 50"
         exit 1
     fi
 }
@@ -500,8 +564,8 @@ check_connectivity() {
 
     log INFO "Checking connectivity to Zabbix server..."
 
-    if systemctl is-active --quiet zabbix-agent2; then
-        log SUCCESS "Agent is active and running"
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        log SUCCESS "$SERVICE_NAME is active and running"
 
         # Check if agent can reach server
         if timeout 5 bash -c "echo > /dev/tcp/$server_ip/10051" 2>/dev/null; then
@@ -511,19 +575,25 @@ check_connectivity() {
             log WARNING "Please check firewall rules and network connectivity"
         fi
     else
-        log ERROR "Agent service is not running"
+        log ERROR "$SERVICE_NAME service is not running"
         exit 1
     fi
 }
 
 # Display summary
 display_summary() {
+    local test_cmd="zabbix_agent2"
+    if [[ "$AGENT_TYPE" == "agent" ]]; then
+        test_cmd="zabbix_agentd"
+    fi
+
     echo ""
     log SUCCESS "======================================"
     log SUCCESS "Zabbix Agent Deployment Complete!"
     log SUCCESS "======================================"
     echo ""
     log INFO "Configuration Summary:"
+    log INFO "  Agent Type: $AGENT_TYPE"
     log INFO "  Hostname: $DETECTED_HOSTNAME"
     log INFO "  IP Address: $DETECTED_IP"
     log INFO "  Server: $SERVER_IP"
@@ -531,10 +601,10 @@ display_summary() {
     log INFO "  Config File: $CONFIG_FILE"
     echo ""
     log INFO "Useful Commands:"
-    log INFO "  Check status: systemctl status zabbix-agent2"
-    log INFO "  View logs: journalctl -u zabbix-agent2 -f"
-    log INFO "  Restart: systemctl restart zabbix-agent2"
-    log INFO "  Test config: zabbix_agent2 -t"
+    log INFO "  Check status: systemctl status $SERVICE_NAME"
+    log INFO "  View logs: journalctl -u $SERVICE_NAME -f"
+    log INFO "  Restart: systemctl restart $SERVICE_NAME"
+    log INFO "  Test config: $test_cmd -t"
     echo ""
     log INFO "Next Steps:"
     log INFO "  1. Add this host in Zabbix server web interface"
@@ -552,6 +622,10 @@ do_install() {
 
     # Detect system metadata
     detect_system_metadata
+    echo ""
+
+    # Detect agent type (agent1 or agent2)
+    detect_agent_type
     echo ""
 
     # Get repository URL and packages
@@ -599,7 +673,7 @@ do_upgrade() {
     echo ""
 
     # Check if agent is installed
-    if ! command -v zabbix_agent2 &> /dev/null; then
+    if ! command -v zabbix_agent2 &> /dev/null && ! command -v zabbix_agentd &> /dev/null; then
         log ERROR "Zabbix Agent is not installed. Use --action install instead"
         exit 1
     fi
@@ -608,8 +682,16 @@ do_upgrade() {
     detect_system_metadata
     echo ""
 
+    # Detect agent type (agent1 or agent2)
+    detect_agent_type
+    echo ""
+
     # Get current version
-    CURRENT_VERSION=$(zabbix_agent2 -V | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+    if [[ "$AGENT_TYPE" == "agent2" ]]; then
+        CURRENT_VERSION=$(zabbix_agent2 -V | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+    else
+        CURRENT_VERSION=$(zabbix_agentd -V | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+    fi
     log INFO "Current version: $CURRENT_VERSION"
     log INFO "Target version: $VERSION"
     echo ""
@@ -631,8 +713,8 @@ do_upgrade() {
     fi
 
     # Stop service
-    log INFO "Stopping Zabbix Agent service..."
-    systemctl stop zabbix-agent2 || true
+    log INFO "Stopping $SERVICE_NAME service..."
+    systemctl stop "$SERVICE_NAME" || true
 
     # Get repository URL and packages
     REPO_URL=$(get_repo_url "$VERSION" "$OS_ID" "$OS_VERSION_ID" "$ARCH")
@@ -665,7 +747,11 @@ do_upgrade() {
     check_connectivity "$SERVER_IP"
 
     # Display upgraded version
-    NEW_VERSION=$(zabbix_agent2 -V | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+    if [[ "$AGENT_TYPE" == "agent2" ]]; then
+        NEW_VERSION=$(zabbix_agent2 -V | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+    else
+        NEW_VERSION=$(zabbix_agentd -V | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+    fi
     log SUCCESS "Upgraded from $CURRENT_VERSION to $NEW_VERSION"
 
     # Display summary

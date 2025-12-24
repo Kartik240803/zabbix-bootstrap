@@ -17,19 +17,32 @@ Production-ready bash scripts for automated installation, upgrade, and managemen
 
 ## ✨ Features
 
+### Server Deployment
 - ✅ **Fully Automated Installation** - Zero manual steps, complete hands-off deployment
 - ✅ **Automatic Frontend Configuration** - Creates web config automatically (no installation wizard)
 - ✅ **Locale Auto-Configuration** - Generates required locales to prevent frontend errors
 - ✅ **Web Server Auto-Configuration** - Automatically configures Nginx/Apache, handles port conflicts
 - ✅ **Smart Service Management** - Proper startup order (no premature service failures)
+
+### Proxy Deployment
+- ✅ **Multi-Database Support** - MySQL, PostgreSQL, and SQLite with automatic setup
+- ✅ **Active/Passive Modes** - Configurable proxy mode for different network topologies
+- ✅ **Automatic Database Installation** - Auto-installs and configures database servers
+- ✅ **Schema Auto-Import** - Automatically imports database schema
+- ✅ **Zero Configuration** - Fully automated proxy-to-server connection setup
+
+### Agent Deployment
+- ✅ **Agent 1 & 2 Support** - Auto-detects installed agent version
+- ✅ **Plugin Support** - Optional MongoDB, MSSQL, PostgreSQL plugins
+- ✅ **Auto-Discovery** - Automatic hostname and IP detection
+- ✅ **Metadata Configuration** - Built-in host metadata setup
+
+### Universal Features
 - ✅ **Automated Upgrades** - Zero-downtime upgrades with automatic backups
 - ✅ **Multi-Platform Support** - Ubuntu, Debian, RHEL, CentOS, Rocky, Alma, Oracle Linux, SLES
-- ✅ **Database Support** - MySQL/MariaDB and PostgreSQL with automatic schema import
-- ✅ **Web Server Support** - Apache and Nginx with intelligent conflict resolution
 - ✅ **Dual Password Modes** - `--default` for dev/test, `--manual` for production
 - ✅ **Automatic Backups** - Configuration and database backups before upgrades
 - ✅ **Version 6.0-7.4 Support** - All current Zabbix LTS and stable versions
-- ✅ **PHP Auto-Detection** - Automatically detects available PHP-FPM version (7.4-8.3)
 - ✅ **Repository Management** - JSON-based repository URL management
 - ✅ **Progress Tracking** - Real-time progress bars and detailed logging
 - ✅ **Non-Interactive Mode** - Full automation support with `--yes` flag
@@ -99,7 +112,28 @@ Main script for Zabbix Server installation and upgrade.
 - Database schema import
 - Service management
 
-### 2. `zabbix-manager.sh` - Master Management Script
+### 2. `zabbix-proxy-deployer.sh` - Proxy Deployment Script
+Dedicated script for Zabbix Proxy installation and upgrade.
+
+**Features:**
+- Full proxy installation with database setup
+- Support for MySQL, PostgreSQL, and SQLite databases
+- Automated upgrades with configuration preservation
+- Active and passive proxy mode support
+- Auto-detection of system metadata
+- Automatic database schema import
+
+### 3. `zabbix-agent-deployer.sh` - Agent Deployment Script
+Dedicated script for Zabbix Agent installation and upgrade.
+
+**Features:**
+- Agent 1 and Agent 2 support with auto-detection
+- Configuration preservation during upgrades
+- Plugin installation support (MongoDB, MSSQL, PostgreSQL)
+- Auto-detection of hostname and IP
+- Metadata configuration
+
+### 4. `zabbix-manager.sh` - Master Management Script
 Unified interface for managing all Zabbix components.
 
 **Features:**
@@ -108,7 +142,7 @@ Unified interface for managing all Zabbix components.
 - Simplified command-line interface
 - Consistent behavior across components
 
-### 3. JSON Configuration Files
+### 5. JSON Configuration Files
 
 #### `zabbix-server-repos.json`
 Repository URLs for Zabbix Server packages.
@@ -120,6 +154,39 @@ Repository URLs for Zabbix Agent packages.
 Repository URLs for Zabbix Proxy packages.
 
 ## 📖 Usage
+
+### Proxy Database Selection: MySQL vs PostgreSQL vs SQLite
+
+**When to use SQLite:**
+- ✅ **Small deployments** - Monitoring < 100 hosts
+- ✅ **Quick testing/development** - No database server needed
+- ✅ **Simple setups** - Single server, minimal complexity
+- ✅ **Low resource environments** - Minimal memory/CPU overhead
+- ✅ **No password required** - Simplest installation
+- ⚠️ **Not recommended for production** with > 100 hosts
+
+**When to use MySQL:**
+- ✅ **Medium to large deployments** - Monitoring > 100 hosts
+- ✅ **Production environments** - Better performance and reliability
+- ✅ **High availability** - Supports replication and clustering
+- ✅ **Team familiarity** - Your team knows MySQL
+- 🔒 **Requires password** - Use `--manual` for production
+
+**When to use PostgreSQL:**
+- ✅ **Enterprise deployments** - Advanced features and performance
+- ✅ **Complex queries** - Better optimization for complex data
+- ✅ **Team preference** - Your team prefers PostgreSQL
+- ✅ **Compliance requirements** - Some organizations mandate PostgreSQL
+- 🔒 **Requires password** - Use `--manual` for production
+
+**Quick Decision Guide:**
+```
+How many hosts will this proxy monitor?
+  └─ < 100 hosts → SQLite (simplest, no password)
+  └─ 100-1000 hosts → MySQL (recommended for most)
+  └─ > 1000 hosts → MySQL or PostgreSQL (your preference)
+  └─ Just testing? → SQLite (quickest setup)
+```
 
 ### Password Modes: `--default` vs `--manual`
 
@@ -172,13 +239,100 @@ sudo ./zabbix-deployer.sh --upgrade --version 7.4 --db mysql --webserver apache 
 sudo ./zabbix-deployer.sh --uninstall
 ```
 
+### Zabbix Proxy Deployment
+
+#### Installation
+
+**With MySQL (Production - Custom Password)**
+```bash
+# Interactive - prompts for database password
+sudo ./zabbix-proxy-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --db mysql --manual
+```
+
+**With MySQL (Development - Default Password)**
+```bash
+# Non-interactive with default password 'zabbix_password'
+sudo ./zabbix-proxy-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --db mysql --default --yes
+```
+
+**With PostgreSQL (Production)**
+```bash
+# Interactive - prompts for database password
+sudo ./zabbix-proxy-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --db pgsql --manual
+```
+
+**With SQLite (Simple - No Password Required)**
+```bash
+# Best for small deployments, no database password needed
+sudo ./zabbix-proxy-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --db sqlite --yes
+```
+
+**Passive Proxy Mode**
+```bash
+# Install proxy in passive mode (server connects to proxy)
+sudo ./zabbix-proxy-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --db mysql --proxy-mode 1 --default --yes
+```
+
+**Custom Hostname**
+```bash
+# Override auto-detected hostname
+sudo ./zabbix-proxy-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --db mysql --hostname zabbix-proxy-01 --default --yes
+```
+
+#### Upgrade
+```bash
+# Upgrade proxy (preserves all configuration)
+sudo ./zabbix-proxy-deployer.sh --action upgrade --version 7.4 \
+  --server-ip 192.168.1.100 --db mysql --yes
+
+# Upgrade with PostgreSQL
+sudo ./zabbix-proxy-deployer.sh --action upgrade --version 7.4 \
+  --server-ip 192.168.1.100 --db pgsql --yes
+
+# Upgrade with SQLite
+sudo ./zabbix-proxy-deployer.sh --action upgrade --version 7.4 \
+  --server-ip 192.168.1.100 --db sqlite --yes
+```
+
+### Zabbix Agent Deployment
+
+#### Installation
+```bash
+# Install Zabbix Agent
+sudo ./zabbix-agent-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --yes
+
+# Install with plugins (MongoDB, MSSQL, PostgreSQL)
+sudo ./zabbix-agent-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --plugins --yes
+
+# Install with custom hostname
+sudo ./zabbix-agent-deployer.sh --action install --version 7.4 \
+  --server-ip 192.168.1.100 --hostname web-server-01 --yes
+```
+
+#### Upgrade
+```bash
+# Upgrade agent (preserves configuration)
+sudo ./zabbix-agent-deployer.sh --action upgrade --version 7.4 \
+  --server-ip 192.168.1.100 --yes
+```
+
 ### Command-Line Options
+
+#### Server Deployment Options (`zabbix-deployer.sh`)
 
 | Option | Required | Values | Description |
 |--------|----------|--------|-------------|
-| `--install` | Yes* | - | Install Zabbix |
-| `--upgrade` | Yes* | - | Upgrade Zabbix |
-| `--uninstall` | Yes* | - | Uninstall Zabbix |
+| `--install` | Yes* | - | Install Zabbix Server |
+| `--upgrade` | Yes* | - | Upgrade Zabbix Server |
+| `--uninstall` | Yes* | - | Uninstall Zabbix Server |
 | `--version` | Yes** | 6.0, 7.0, 7.2, 7.4 | Zabbix version to install/upgrade |
 | `--db` | Yes** | mysql, pgsql | Database type (MySQL/MariaDB or PostgreSQL) |
 | `--webserver` | Yes** | apache, nginx | Web server type |
@@ -189,6 +343,35 @@ sudo ./zabbix-deployer.sh --uninstall
 \* One action required (install, upgrade, or uninstall)
 \*\* Required for install/upgrade, not required for uninstall
 \*\*\* Either `--default` or `--manual` required for install action only
+
+#### Proxy Deployment Options (`zabbix-proxy-deployer.sh`)
+
+| Option | Required | Values | Description |
+|--------|----------|--------|-------------|
+| `--action` | Yes | install, upgrade | Action to perform |
+| `--version` | Yes | 6.0, 7.0, 7.2, 7.4 | Zabbix version to install/upgrade |
+| `--server-ip` | Yes | IP address | Zabbix server IP address |
+| `--db` | Yes | mysql, pgsql, sqlite | Database type |
+| `--default` | Yes* | - | **Dev/Test Mode**: Uses default password `zabbix_password` |
+| `--manual` | Yes* | - | **Production Mode**: Prompts for secure custom password |
+| `--hostname` | No | String | Override auto-detected hostname |
+| `--proxy-mode` | No | 0 (active), 1 (passive) | Proxy mode (default: 0 - active) |
+| `--yes`, `-y` | No | - | Auto-confirm all prompts (non-interactive mode) |
+| `--help`, `-h` | No | - | Show help message |
+
+\* Either `--default` or `--manual` required for install with mysql/pgsql only
+
+#### Agent Deployment Options (`zabbix-agent-deployer.sh`)
+
+| Option | Required | Values | Description |
+|--------|----------|--------|-------------|
+| `--action` | Yes | install, upgrade | Action to perform |
+| `--version` | Yes | 6.0, 7.0, 7.2, 7.4 | Zabbix version to install/upgrade |
+| `--server-ip` | Yes | IP address | Zabbix server IP address |
+| `--plugins` | No | - | Install additional plugins (mongodb, mssql, postgresql) |
+| `--hostname` | No | String | Override auto-detected hostname |
+| `--yes`, `-y` | No | - | Auto-confirm all prompts (non-interactive mode) |
+| `--help`, `-h` | No | - | Show help message |
 
 ## 📝 Configuration Files
 
@@ -289,7 +472,52 @@ sudo ./zabbix-deployer.sh --install --default \
 # Later, change password using secrets management or manual update
 ```
 
-### Example 6: Using Master Manager
+### Example 6: Proxy Deployment with MySQL (Production)
+```bash
+# Install Zabbix Proxy with MySQL and custom password
+# Interactive - prompts for password
+sudo ./zabbix-proxy-deployer.sh --action install \
+  --version 7.4 \
+  --server-ip 192.168.1.100 \
+  --db mysql \
+  --manual
+```
+
+### Example 7: Proxy Deployment with SQLite (Quick Setup)
+```bash
+# Install Zabbix Proxy with SQLite
+# No database password needed - perfect for small deployments
+sudo ./zabbix-proxy-deployer.sh --action install \
+  --version 7.4 \
+  --server-ip 192.168.1.100 \
+  --db sqlite \
+  --yes
+```
+
+### Example 8: Passive Proxy Deployment
+```bash
+# Install Zabbix Proxy in passive mode
+# Server connects to proxy instead of proxy connecting to server
+sudo ./zabbix-proxy-deployer.sh --action install \
+  --version 7.4 \
+  --server-ip 192.168.1.100 \
+  --db mysql \
+  --proxy-mode 1 \
+  --default \
+  --yes
+```
+
+### Example 9: Agent Deployment
+```bash
+# Install Zabbix Agent with plugins
+sudo ./zabbix-agent-deployer.sh --action install \
+  --version 7.4 \
+  --server-ip 192.168.1.100 \
+  --plugins \
+  --yes
+```
+
+### Example 10: Using Master Manager
 ```bash
 # Install Zabbix Agent on multiple hosts
 sudo ./zabbix-manager.sh \
@@ -313,13 +541,23 @@ sudo ./zabbix-manager.sh \
 
 ### Check Installation Logs
 ```bash
+# Server logs
 tail -f /var/log/zabbix_install.log
+
+# Proxy logs
+tail -f /var/log/zabbix_proxy_install.log
+
+# Agent logs
+tail -f /var/log/zabbix_agent_install.log
 ```
 
 ### Verify Services
 ```bash
 # Check Zabbix Server
 systemctl status zabbix-server
+
+# Check Zabbix Proxy
+systemctl status zabbix-proxy
 
 # Check Zabbix Agent
 systemctl status zabbix-agent2
@@ -371,6 +609,49 @@ sudo systemctl start nginx
 
 #### Issue: "PHP-FPM version not found"
 **Solution**: Install a supported PHP version (7.4-8.3) or let the script use the default `php-fpm`
+
+#### Issue: "Zabbix proxy won't start - database connection failed"
+**Solution**: Check database credentials in `/etc/zabbix/zabbix_proxy.conf`:
+```bash
+# For MySQL/PostgreSQL
+grep -E "^DB" /etc/zabbix/zabbix_proxy.conf
+
+# Verify database exists
+mysql -uzabbix -p -e "SHOW DATABASES LIKE 'zabbix_proxy';"
+
+# For PostgreSQL
+sudo -u postgres psql -l | grep zabbix_proxy
+```
+
+#### Issue: "Proxy cannot connect to Zabbix server"
+**Solution**: Check firewall and network connectivity:
+```bash
+# Test connection to server
+telnet 192.168.1.100 10051
+
+# Check proxy logs
+journalctl -u zabbix-proxy -n 100
+
+# Verify Server parameter in config
+grep "^Server=" /etc/zabbix/zabbix_proxy.conf
+```
+
+#### Issue: "SQLite database permission denied"
+**Solution**: Ensure proper permissions:
+```bash
+# Fix ownership
+sudo chown -R zabbix:zabbix /var/lib/zabbix
+
+# Verify permissions
+ls -la /var/lib/zabbix/
+```
+
+#### Issue: "Proxy shows as unavailable in Zabbix server"
+**Solution**:
+1. Verify proxy is registered in Zabbix server web interface (Configuration → Proxies)
+2. Check proxy hostname matches exactly in both config and server
+3. For passive proxies, ensure server can connect to proxy port 10051
+4. Check proxy logs: `journalctl -u zabbix-proxy -f`
 
 ### Manual Recovery
 
@@ -504,7 +785,9 @@ sudo systemctl restart apache2
 
 ```
 /root/zab-upgrade/
-├── zabbix-deployer.sh           # Main server deployment script
+├── zabbix-deployer.sh            # Server deployment script
+├── zabbix-proxy-deployer.sh      # Proxy deployment script
+├── zabbix-agent-deployer.sh      # Agent deployment script
 ├── zabbix-manager.sh             # Master management script
 ├── zabbix-server-repos.json      # Server repository URLs
 ├── zabbix-agent-repos.json       # Agent repository URLs
@@ -512,12 +795,31 @@ sudo systemctl restart apache2
 ├── zabbix_server_config.conf     # Server configuration
 ├── check.sh                      # Verification script
 ├── README.md                     # This file
+├── QUICKSTART.md                 # Quick start guide
+├── FILES_SUMMARY.md              # File summary
 └── zabbix-release_*.deb          # Repository packages (downloaded)
+
+Generated during installation/upgrade:
+├── /var/log/zabbix_install.log         # Server installation logs
+├── /var/log/zabbix_proxy_install.log   # Proxy installation logs
+├── /var/log/zabbix_agent_install.log   # Agent installation logs
+├── /opt/zabbix-config-backup/          # Configuration backups
+└── /opt/zabbix-backup-*/               # Full backup directories (upgrade)
 ```
 
 ## 🔄 Changelog
 
-### Version 2.1 (Current - December 2025)
+### Version 2.2 (Current - December 2025)
+- ✅ **Proxy Deployment Script**: New dedicated `zabbix-proxy-deployer.sh` script for proxy management
+- ✅ **Multi-Database Support for Proxy**: MySQL, PostgreSQL, and SQLite database support
+- ✅ **Active/Passive Proxy Modes**: Configurable proxy mode (active or passive)
+- ✅ **Automatic Database Setup**: Auto-installs and configures database servers
+- ✅ **Schema Auto-Import**: Automatically imports Zabbix proxy database schema
+- ✅ **Agent Deployment Script**: Dedicated `zabbix-agent-deployer.sh` script with plugin support
+- ✅ **Configuration Preservation**: All scripts preserve configurations during upgrades
+- ✅ **Enhanced Documentation**: Comprehensive examples for all deployment scenarios
+
+### Version 2.1 (December 2025)
 - ✅ **Locale Configuration**: Automatic generation of `en_US.UTF-8` locale to prevent frontend errors
 - ✅ **Frontend Auto-Configuration**: Creates `/etc/zabbix/web/zabbix.conf.php` automatically (no installation wizard)
 - ✅ **Web Server Auto-Configuration**:
